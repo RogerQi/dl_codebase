@@ -1,5 +1,4 @@
-from .classification import *
-from .detection import *
-from .auto_encoder import *
-
-def dispatcher
+def dispatcher(cfg):
+    if cfg.BACKBONE.network == "dropout_lenet":
+        from .classification import dropout_lenet
+        return dropout_lenet.net
