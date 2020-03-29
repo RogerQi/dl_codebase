@@ -2,5 +2,5 @@
 Codebase for Roger's Deep Learning Projects
 
 Dependencies
-    - PyTorch (torch, torchvision)
-    - yacs
+- PyTorch (torch, torchvision)
+- yacs
