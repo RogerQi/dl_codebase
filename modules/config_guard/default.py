@@ -33,6 +33,11 @@ _C.CLASSIFIER = CN()
 _C.CLASSIFIER.classifier = "dense"
 _C.CLASSIFIER.bias = False
 
+# Loss
+_C.LOSS = CN()
+_C.LOSS.loss = "none"
+_C.LOSS.loss_factor = "not yet implemented"
+
 # Dataset Settings
 _C.DATASET = CN()
 _C.DATASET.dataset = 'cifar10'

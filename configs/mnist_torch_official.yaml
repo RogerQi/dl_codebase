@@ -9,6 +9,9 @@ SYSTEM:
 BACKBONE:
   network: 'dropout_lenet'
 
+LOSS:
+  loss: 'nll_loss'
+
 DATASET:
   dataset: 'mnist'
 

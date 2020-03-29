@@ -2,11 +2,11 @@ import __init_lib_path
 from config_guard import cfg, update_config_from_yaml
 import dataset
 import network
+import loss
 
 import argparse
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 
 def parse_args():
@@ -17,13 +17,13 @@ def parse_args():
 
     return args
 
-def train(cfg, model, device, train_loader, optimizer, epoch):
+def train(cfg, model, criterion, device, train_loader, optimizer, epoch):
     model.train()
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
         output = model(data)
-        loss = F.nll_loss(output, target)
+        loss = criterion(output, target)
         loss.backward()
         optimizer.step()
         if batch_idx % cfg.TRAIN.log_interval == 0:
@@ -32,7 +32,7 @@ def train(cfg, model, device, train_loader, optimizer, epoch):
                 100. * batch_idx / len(train_loader), loss.item()))
 
 
-def test(cfg, model, device, test_loader):
+def test(cfg, model, criterion, device, test_loader):
     model.eval()
     test_loss = 0
     correct = 0
@@ -40,7 +40,7 @@ def test(cfg, model, device, test_loader):
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
             output = model(data)
-            test_loss += F.nll_loss(output, target, reduction='sum').item()  # sum up batch loss
+            test_loss += criterion(output, target, reduction='sum').item()  # sum up batch loss
             pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
             correct += pred.eq(target.view_as(pred)).sum().item()
 
@@ -78,12 +78,15 @@ def main():
 
     # --------------------------
     # | Get ready to learn
-    # |  1. Prepare network
+    # |  1. Prepare network and loss
     # |  2. Prepare optimizer
     # |  3. Set learning rate
     # --------------------------
     Net = network.dispatcher(cfg)
     model = Net(cfg.input_dim).to(device)
+
+    criterion = loss.dispatcher(cfg)
+
     optimizer = optim.Adadelta(model.parameters(), lr = cfg.TRAIN.initial_lr)
 
     # Prepare LR scheduler
@@ -91,8 +94,8 @@ def main():
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, cfg.TRAIN.step_down_on_epoch, cfg.TRAIN.step_down_gamma)
 
     for epoch in range(1, cfg.TRAIN.max_epochs + 1):
-        train(cfg, model, device, train_loader, optimizer, epoch)
-        test(cfg, model, device, test_loader)
+        train(cfg, model, criterion, device, train_loader, optimizer, epoch)
+        test(cfg, model, criterion, device, test_loader)
         scheduler.step()
 
     if cfg.save_model:
