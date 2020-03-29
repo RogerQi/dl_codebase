@@ -1,6 +1,7 @@
-# roger_dl_codebase
-Codebase for Roger's Deep Learning Projects
+# Roger's Deep Learning Tools of the Trade
 
 Dependencies
 - PyTorch (torch, torchvision)
 - yacs
+- OpenCV
+- PIL
