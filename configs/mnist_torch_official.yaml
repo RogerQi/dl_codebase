@@ -9,6 +9,9 @@ SYSTEM:
 BACKBONE:
   network: 'dropout_lenet'
 
+CLASSIFIER:
+  classifier: "log_softmax"
+
 LOSS:
   loss: 'nll_loss'
 

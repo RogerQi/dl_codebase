@@ -2,6 +2,7 @@ import __init_lib_path
 from config_guard import cfg, update_config_from_yaml
 import dataset
 import network
+import classifier
 import loss
 
 import argparse
@@ -17,12 +18,13 @@ def parse_args():
 
     return args
 
-def train(cfg, model, criterion, device, train_loader, optimizer, epoch):
+def train(cfg, model, classifier, criterion, device, train_loader, optimizer, epoch):
     model.train()
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
-        output = model(data)
+        logits = model(data)
+        output = classifier(logits)
         loss = criterion(output, target)
         loss.backward()
         optimizer.step()
@@ -32,14 +34,15 @@ def train(cfg, model, criterion, device, train_loader, optimizer, epoch):
                 100. * batch_idx / len(train_loader), loss.item()))
 
 
-def test(cfg, model, criterion, device, test_loader):
+def test(cfg, model, classifier, criterion, device, test_loader):
     model.eval()
     test_loss = 0
     correct = 0
     with torch.no_grad():
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
-            output = model(data)
+            logits = model(data)
+            output = classifier(logits)
             test_loss += criterion(output, target, reduction='sum').item()  # sum up batch loss
             pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
             correct += pred.eq(target.view_as(pred)).sum().item()
@@ -85,6 +88,8 @@ def main():
     Net = network.dispatcher(cfg)
     model = Net(cfg.input_dim).to(device)
 
+    logit_processor = classifier.dispatcher(cfg)
+
     criterion = loss.dispatcher(cfg)
 
     optimizer = optim.Adadelta(model.parameters(), lr = cfg.TRAIN.initial_lr)
@@ -94,8 +99,8 @@ def main():
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, cfg.TRAIN.step_down_on_epoch, cfg.TRAIN.step_down_gamma)
 
     for epoch in range(1, cfg.TRAIN.max_epochs + 1):
-        train(cfg, model, criterion, device, train_loader, optimizer, epoch)
-        test(cfg, model, criterion, device, test_loader)
+        train(cfg, model, logit_processor, criterion, device, train_loader, optimizer, epoch)
+        test(cfg, model, logit_processor, criterion, device, test_loader)
         scheduler.step()
 
     if cfg.save_model:

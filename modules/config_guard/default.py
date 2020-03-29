@@ -30,13 +30,14 @@ _C.BACKBONE.pretrained_weights = "none"
 # Classification Layer
 # TODO: decouple backbone and classifier
 _C.CLASSIFIER = CN()
-_C.CLASSIFIER.classifier = "dense"
+_C.CLASSIFIER.classifier = "none"
+_C.CLASSIFIER.factor = 0
 _C.CLASSIFIER.bias = False
 
 # Loss
 _C.LOSS = CN()
 _C.LOSS.loss = "none"
-_C.LOSS.loss_factor = "not yet implemented"
+_C.LOSS.loss_factor = 0
 
 # Dataset Settings
 _C.DATASET = CN()
