@@ -18,3 +18,5 @@ def dispatcher(cfg):
         def log_softmax_wrapper(x):
             return F.log_softmax(x, dim = 1)
         return log_softmax_wrapper
+    else:
+        raise NotImplementedError

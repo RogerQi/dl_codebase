@@ -5,3 +5,5 @@ def dispatcher(cfg):
         return [get_train_set(cfg), get_test_set(cfg)]
     elif dataset_name == "cifar10":
         raise NotImplementedError
+    else:
+        raise NotImplementedError

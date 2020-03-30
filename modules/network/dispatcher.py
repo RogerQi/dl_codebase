@@ -12,3 +12,5 @@ def dispatcher(cfg):
     elif network_name == "naive_vae":
         from .auto_encoder import naive_vae
         return naive_vae.net
+    else:
+        raise NotImplementedError

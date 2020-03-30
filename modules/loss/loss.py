@@ -19,4 +19,4 @@ class naive_VAE(nn.Module):
     
     def forward(self, output, original_input):
         assert output.shape == original_input.shape
-        return F.kl_div(output, original_input) + 0 # TODO
+        return F.kl_div(output, original_input, reduction = 'mean') + F.mse_loss(output, original_input)

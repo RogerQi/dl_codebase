@@ -18,3 +18,5 @@ def dispatcher(cfg):
         return F.nll_loss
     elif loss_name == "mse":
         return F.mse_loss
+    else:
+        raise NotImplementedError

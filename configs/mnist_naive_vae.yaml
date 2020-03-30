@@ -1,4 +1,4 @@
-name: 'mnist_naive_auto_encoder'
+name: 'mnist_naive_vae'
 task: 'auto_encoder'
 input_dim: (28, 28)
 num_classes: 10
@@ -8,13 +8,13 @@ SYSTEM:
   use_cpu: false
 
 BACKBONE:
-  network: 'naive_auto_encoder'
+  network: 'naive_vae'
 
 CLASSIFIER:
   classifier: "identity"
 
 LOSS:
-  loss: 'mse'
+  loss: 'naive_vae'
 
 DATASET:
   dataset: 'mnist'

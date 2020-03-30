@@ -115,7 +115,7 @@ def main():
         scheduler.step()
 
     if cfg.save_model:
-        torch.save(model.state_dict(), "mnist_cnn.pt")
+        torch.save(model.state_dict(), "{0}_final.pt".format(cfg.name))
 
 
 if __name__ == '__main__':
