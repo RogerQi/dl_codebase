@@ -17,4 +17,4 @@ def dispatcher(cfg):
         assert cfg.CLASSIFIER.classifier == "log_softmax" # Some math here!
         return F.nll_loss
     elif loss_name == "mse":
-        return None # TODO
+        return F.mse_loss

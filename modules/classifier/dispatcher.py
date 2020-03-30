@@ -6,7 +6,7 @@ def dispatcher(cfg):
     classifier_name = cfg.CLASSIFIER.classifier
     assert classifier_name != "none"
     if classifier_name == "identity":
-        assert cfg.CLASSIFIER.task == "auto_encoder"
+        assert cfg.task == "auto_encoder"
         def identity_func(x):
             return x
         return identity_func

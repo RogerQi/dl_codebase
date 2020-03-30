@@ -25,7 +25,11 @@ def train(cfg, model, classifier, criterion, device, train_loader, optimizer, ep
         optimizer.zero_grad()
         logits = model(data)
         output = classifier(logits)
-        loss = criterion(output, target)
+        if cfg.task == "auto_encoder":
+            output = output.reshape(data.shape)
+            loss = criterion(output, data)
+        else:
+            loss = criterion(output, target)
         loss.backward()
         optimizer.step()
         if batch_idx % cfg.TRAIN.log_interval == 0:
@@ -43,15 +47,22 @@ def test(cfg, model, classifier, criterion, device, test_loader):
             data, target = data.to(device), target.to(device)
             logits = model(data)
             output = classifier(logits)
-            test_loss += criterion(output, target, reduction='sum').item()  # sum up batch loss
-            pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
-            correct += pred.eq(target.view_as(pred)).sum().item()
+            if cfg.task == "auto_encoder":
+                output = output.reshape(data.shape)
+                test_loss += criterion(output, data).item()
+            else:
+                test_loss += criterion(output, target).item()  # sum up batch loss
+                pred = output.argmax(dim = 1, keepdim = True)  # get the index of the max log-probability
+                correct += pred.eq(target.view_as(pred)).sum().item()
 
     test_loss /= len(test_loader.dataset)
 
-    print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
-        test_loss, correct, len(test_loader.dataset),
-        100. * correct / len(test_loader.dataset)))
+    if cfg.task == "auto_encoder":
+        print('\nTest set: Average loss: {:.4f}\n'.format(test_loss))
+    else:
+        print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
+            test_loss, correct, len(test_loader.dataset),
+            100. * correct / len(test_loader.dataset)))
 
 
 def main():
