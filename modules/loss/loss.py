@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class cross_entropy(nn.module):
+class cross_entropy(nn.Module):
     '''
     (Optionally) Weighted cross entropy loss
     '''

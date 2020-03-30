@@ -86,7 +86,7 @@ def main():
     # |  3. Set learning rate
     # --------------------------
     Net = network.dispatcher(cfg)
-    model = Net(cfg.input_dim).to(device)
+    model = Net(cfg).to(device)
 
     logit_processor = classifier.dispatcher(cfg)
 

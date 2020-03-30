@@ -3,8 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class net(nn.Module):
-    def __init__(self, input_dim):
-        assert input_dim == (32, 32)
+    def __init__(self, cfg):
+        assert cfg.input_dim == (28, 28)
         super(net, self).__init__()
         self.conv1 = nn.Conv2d(1, 32, 3, 1)
         self.conv2 = nn.Conv2d(32, 64, 3, 1)

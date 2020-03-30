@@ -12,6 +12,7 @@ _C = CN()
 _C.name = "Experiment Name"
 _C.seed = 1221
 _C.task = "classification"
+_C.num_classes = -1
 _C.input_dim = (32, 32)
 _C.save_model = False
 
@@ -28,7 +29,6 @@ _C.BACKBONE.network = "dropout_lenet"
 _C.BACKBONE.pretrained_weights = "none"
 
 # Classification Layer
-# TODO: decouple backbone and classifier
 _C.CLASSIFIER = CN()
 _C.CLASSIFIER.classifier = "none"
 _C.CLASSIFIER.factor = 0

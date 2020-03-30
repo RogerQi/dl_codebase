@@ -1,4 +1,4 @@
-name: 'pytorch_mnist_lenet_w_dropout'
+name: 'pytorch_mnist_random_mlp'
 task: 'classification'
 input_dim: (28, 28)
 num_classes: 10
@@ -8,13 +8,13 @@ SYSTEM:
   use_cpu: false
 
 BACKBONE:
-  network: 'dropout_lenet'
+  network: 'mlp'
 
 CLASSIFIER:
-  classifier: "log_softmax"
+  classifier: "softmax"
 
 LOSS:
-  loss: 'nll_loss'
+  loss: 'cross_entropy'
 
 DATASET:
   dataset: 'mnist'
