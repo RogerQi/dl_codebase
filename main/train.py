@@ -27,7 +27,7 @@ def train(cfg, model, classifier, criterion, device, train_loader, optimizer, ep
         output = classifier(logits)
         if cfg.task == "auto_encoder":
             output = output.reshape(data.shape)
-            loss = criterion(output, data)
+            loss = criterion(output, data, model.aux_dict)
         else:
             loss = criterion(output, target)
         loss.backward()
@@ -49,7 +49,7 @@ def test(cfg, model, classifier, criterion, device, test_loader):
             output = classifier(logits)
             if cfg.task == "auto_encoder":
                 output = output.reshape(data.shape)
-                test_loss += criterion(output, data).item()
+                test_loss += criterion(output, data, model.aux_dict).item()
             else:
                 test_loss += criterion(output, target).item()  # sum up batch loss
                 pred = output.argmax(dim = 1, keepdim = True)  # get the index of the max log-probability
