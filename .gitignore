@@ -1,4 +1,5 @@
 # User added
+*.ipynb # ipynb files are generally big... use git add -f if necessary
 .DS_Store
 *.pt
 *.mp4
