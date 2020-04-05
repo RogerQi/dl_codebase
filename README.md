@@ -7,13 +7,13 @@ Dependencies
 - PIL
 
 TODOs
+- Support for specifying dataset transforms in yaml
 - Support for 2D segmentation task
 - Add more options for classifier/dataset/loss/network
     - Classifier
         - Dense
     - Dataset
         - Cifar10
-        - ImageNet
     - Loss
     - Network
         - Resnet
