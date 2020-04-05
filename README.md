@@ -7,7 +7,6 @@ Dependencies
 - PIL
 
 TODOs
-- Implement naive CVAE and test on MNIST
 - Support for 2D segmentation task
 - Add more options for classifier/dataset/loss/network
     - Classifier
