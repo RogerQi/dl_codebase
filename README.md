@@ -22,6 +22,11 @@ TODOs
     - Computation Graph + Weights
     - Just weights
     - Feature Extraction
+- Support for transforms
+    - random resized crop
+    - random horizontal flip
+    - center crop
+    - resize
 
 
 Future TODOs
