@@ -27,6 +27,9 @@ _C.SYSTEM.num_workers = 4	# Number of CPU workers for errands
 _C.BACKBONE = CN()
 _C.BACKBONE.network = "dropout_lenet"
 _C.BACKBONE.pretrained_weights = "none"
+_C.BACKBONE.forward_need_label = False
+_C.BACKBONE.AUTO_ENCODER = CN()
+_C.BACKBONE.AUTO_ENCODER.conditional = False
 
 # Classification Layer
 _C.CLASSIFIER = CN()

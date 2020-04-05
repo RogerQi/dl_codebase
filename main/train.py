@@ -11,7 +11,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Roger's Deep Learning Playground")
+    parser = argparse.ArgumentParser(description = "Roger's Deep Learning Playground")
     parser.add_argument('--cfg', help = "specify particular yaml configuration to use", required = True,
         default = "configs/mnist_torch_official.taml", type = str)
     args = parser.parse_args()
@@ -23,7 +23,11 @@ def train(cfg, model, classifier, criterion, device, train_loader, optimizer, ep
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
-        logits = model(data)
+        if cfg.BACKBONE.forward_need_label:
+            # For certain task (e.g. CVAE), the network takes label as inputs
+            logits = model(data, target)
+        else:
+            logits = model(data)
         output = classifier(logits)
         if cfg.task == "auto_encoder":
             output = output.reshape(data.shape)
@@ -45,7 +49,11 @@ def test(cfg, model, classifier, criterion, device, test_loader):
     with torch.no_grad():
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
-            logits = model(data)
+            if cfg.BACKBONE.forward_need_label:
+                # For certain task (e.g. CVAE), the network takes label as inputs
+                logits = model(data, target)
+            else:
+                logits = model(data)
             output = classifier(logits)
             if cfg.task == "auto_encoder":
                 output = output.reshape(data.shape)

@@ -9,6 +9,9 @@ SYSTEM:
 
 BACKBONE:
   network: 'naive_vae'
+  forward_need_label: True
+  AUTO_ENCODER:
+    conditional: True
 
 CLASSIFIER:
   classifier: "identity"
