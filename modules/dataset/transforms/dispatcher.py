@@ -1,0 +1,2 @@
+def dispatcher(cfg):
+    pass

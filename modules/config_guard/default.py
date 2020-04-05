@@ -45,6 +45,10 @@ _C.LOSS.loss_factor = 0
 # Dataset Settings
 _C.DATASET = CN()
 _C.DATASET.dataset = 'cifar10'
+_C.DATASET.TRANSFORM = CN()
+_C.DATASET.TRANSFORM.train_transforms = ('none')
+_C.DATASET.TRANSFORM.test_transforms = ('none')
+_C.DATASET.TRANSFORM.TRANSFORM_DETAILS = CN()
 
 # Training Settings
 _C.TRAIN = CN()
