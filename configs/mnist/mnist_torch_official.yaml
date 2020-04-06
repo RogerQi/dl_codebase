@@ -18,6 +18,19 @@ LOSS:
 
 DATASET:
   dataset: 'mnist'
+  TRANSFORM:
+    TRAIN:
+      transforms: ('normalize', )
+      TRANSFORMS_DETAILS:
+        NORMALIZE:
+          mean: (0.1307,)
+          sd: (0.3081,)
+    TEST:
+      transforms: ('normalize', )
+      TRANSFORMS_DETAILS:
+        NORMALIZE:
+          mean: (0.1307,)
+          sd: (0.3081,)
 
 TRAIN:
   max_epochs: 14

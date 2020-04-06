@@ -60,7 +60,7 @@ def test(cfg, model, classifier, criterion, device, test_loader):
                 test_loss += criterion(output, data, model.aux_dict).item()
             else:
                 test_loss += criterion(output, target).item()  # sum up batch loss
-                pred = output.argmax(dim = 1, keepdim = True)  # get the index of the max log-probability
+                pred = output.argmax(dim = 1, keepdim = True)
                 correct += pred.eq(target.view_as(pred)).sum().item()
 
     test_loss /= len(test_loader.dataset)
