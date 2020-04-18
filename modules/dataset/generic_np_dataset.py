@@ -17,9 +17,6 @@ def get_train_set(cfg):
     return base_set(ds, "train", cfg)
 
 def get_val_set(cfg):
-    raise NotImplementedError
-
-def get_test_set(cfg):
     data_npy_path = cfg.DATASET.NUMPY_READER.test_data_npy_path
     label_npy_path = cfg.DATASET.NUMPY_READER.test_label_npy_path
     if cfg.DATASET.NUMPY_READER.mmap:

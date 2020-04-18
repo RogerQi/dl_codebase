@@ -11,6 +11,3 @@ def get_val_set(cfg):
     ds = datasets.ImageNet('~/datasets', split = 'val', download = True,
                         transform = transforms.ToTensor())
     return base_set(ds, "test", cfg)
-
-def get_test_set(cfg):
-    raise ValueError("ImageNet does not come with test set!")

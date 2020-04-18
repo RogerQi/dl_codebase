@@ -20,6 +20,12 @@ def random_resized_crop(transforms_cfg):
     return op
 
 @my_transforms_registry.register
+def random_crop(transforms_cfg):
+    size = transforms_cfg.TRANSFORMS_DETAILS.crop_size
+    op = transforms.RandomCrop(size, padding = 4)
+    return op
+
+@my_transforms_registry.register
 def random_horizontal_flip(transforms_cfg):
     op = transforms.RandomHorizontalFlip(p = 0.5)
     return op
