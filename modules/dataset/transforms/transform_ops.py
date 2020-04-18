@@ -16,7 +16,7 @@ def random_resized_crop(transforms_cfg):
     size = transforms_cfg.TRANSFORMS_DETAILS.crop_size
     scale = transforms_cfg.TRANSFORMS_DETAILS.RANDOM_RESIZED_CROP.scale
     ratio = transforms_cfg.TRANSFORMS_DETAILS.RANDOM_RESIZED_CROP.ratio
-    op = transforms.RandomResizedCrop(self.size, self.scale, self.ratio, interpolation = Image.BILINEAR)
+    op = transforms.RandomResizedCrop(size, scale, ratio, interpolation = Image.BILINEAR)
     return op
 
 @my_transforms_registry.register
@@ -27,13 +27,13 @@ def random_horizontal_flip(transforms_cfg):
 @my_transforms_registry.register
 def center_crop(transforms_cfg):
     size = transforms_cfg.TRANSFORMS_DETAILS.crop_size
-    op = transforms.CenterCrop(self.size)
+    op = transforms.CenterCrop(size)
     return op
 
 @my_transforms_registry.register
 def resize(transforms_cfg):
-    size = transforms_cfg.TRANSFORMS_DETAILS.crop_size
-    op = transforms.Resize(self.size, interpolation = Image.BILINEAR)
+    size = transforms_cfg.TRANSFORMS_DETAILS.resize_size
+    op = transforms.Resize(size, interpolation = Image.BILINEAR)
     return op
 
 ######################
