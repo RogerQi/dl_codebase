@@ -1,4 +1,4 @@
-name: 'pytorch_mnist_lenet_w_dropout'
+name: 'pytorch_mnist_lenet'
 task: 'classification'
 input_dim: (28, 28)
 num_classes: 10
@@ -8,10 +8,10 @@ SYSTEM:
   use_cpu: false
 
 BACKBONE:
-  network: 'dropout_lenet'
+  network: 'lenet'
 
 CLASSIFIER:
-  classifier: "log_softmax"
+  classifier: "fc"
 
 LOSS:
   loss: 'nll_loss'

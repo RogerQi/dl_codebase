@@ -14,8 +14,10 @@ def dispatcher(cfg):
         from .loss import naive_VAE
         return naive_VAE(cfg)
     elif loss_name == "nll_loss":
-        assert cfg.CLASSIFIER.classifier == "log_softmax" # Some math here!
-        return F.nll_loss
+        def nll_loss_processor(x, target):
+            x = F.log_softmax(x, dim = 1)
+            return F.nll_loss(x, target)
+        return nll_loss_processor
     elif loss_name == "mse":
         return F.mse_loss
     else:

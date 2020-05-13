@@ -1,7 +1,7 @@
 import __init_lib_path
 from config_guard import cfg, update_config_from_yaml
 import dataset
-import network
+import backbone
 import classifier
 import loss
 
@@ -18,22 +18,15 @@ def parse_args():
 
     return args
 
-def train(cfg, model, classifier, criterion, device, train_loader, optimizer, epoch):
+def train(cfg, model, post_processor, criterion, device, train_loader, optimizer, epoch):
     model.train()
+    post_processor.train()
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad() # reset gradient
-        if cfg.BACKBONE.forward_need_label:
-            # For certain task (e.g. CVAE), the network takes label as inputs
-            logits = model(data, target)
-        else:
-            logits = model(data)
-        output = classifier(logits)
-        if cfg.task == "auto_encoder":
-            output = output.reshape(data.shape)
-            loss = criterion(output, data, model.aux_dict)
-        else:
-            loss = criterion(output, target)
+        feature = model(data)
+        output = post_processor(feature)
+        loss = criterion(output, target)
         loss.backward()
         optimizer.step()
         if batch_idx % cfg.TRAIN.log_interval == 0:
@@ -42,26 +35,19 @@ def train(cfg, model, classifier, criterion, device, train_loader, optimizer, ep
                 100. * batch_idx / len(train_loader), loss.item()))
 
 
-def test(cfg, model, classifier, criterion, device, test_loader):
+def test(cfg, model, post_processor, criterion, device, test_loader):
     model.eval()
+    post_processor.eval()
     test_loss = 0
     correct = 0
     with torch.no_grad():
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
-            if cfg.BACKBONE.forward_need_label:
-                # For certain task (e.g. CVAE), the network takes label as inputs
-                logits = model(data, target)
-            else:
-                logits = model(data)
-            output = classifier(logits)
-            if cfg.task == "auto_encoder":
-                output = output.reshape(data.shape)
-                test_loss += criterion(output, data, model.aux_dict).item()
-            else:
-                test_loss += criterion(output, target).item()  # sum up batch loss
-                pred = output.argmax(dim = 1, keepdim = True)
-                correct += pred.eq(target.view_as(pred)).sum().item()
+            feature = model(data)
+            output = post_processor(feature)
+            test_loss += criterion(output, target).item()  # sum up batch loss
+            pred = output.argmax(dim = 1, keepdim = True)
+            correct += pred.eq(target.view_as(pred)).sum().item()
 
     test_loss /= len(test_loader.dataset)
 
@@ -104,26 +90,30 @@ def main():
     # |  2. Prepare optimizer
     # |  3. Set learning rate
     # --------------------------
-    Net = network.dispatcher(cfg)
-    model = Net(cfg).to(device)
+    backbone_net = backbone.dispatcher(cfg)
+    backbone_net = backbone_net(cfg).to(device)
+    feature_size = backbone_net.get_feature_size()
 
-    logit_processor = classifier.dispatcher(cfg)
+    post_processor = classifier.dispatcher(cfg, feature_size)
+    post_processor = post_processor.to(device)
 
     criterion = loss.dispatcher(cfg)
 
-    optimizer = optim.Adadelta(model.parameters(), lr = cfg.TRAIN.initial_lr)
+    trainable_params = list(backbone_net.parameters()) + list(post_processor.parameters())
+
+    optimizer = optim.Adadelta(trainable_params, lr = cfg.TRAIN.initial_lr)
 
     # Prepare LR scheduler
     if cfg.TRAIN.lr_scheduler == "step_down":
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, cfg.TRAIN.step_down_on_epoch, cfg.TRAIN.step_down_gamma)
 
     for epoch in range(1, cfg.TRAIN.max_epochs + 1):
-        train(cfg, model, logit_processor, criterion, device, train_loader, optimizer, epoch)
-        test(cfg, model, logit_processor, criterion, device, test_loader)
+        train(cfg, backbone_net, post_processor, criterion, device, train_loader, optimizer, epoch)
+        test(cfg, backbone_net, post_processor, criterion, device, test_loader)
         scheduler.step()
 
     if cfg.save_model:
-        torch.save(model.state_dict(), "{0}_final.pt".format(cfg.name))
+        torch.save(backbone_net.state_dict(), "{0}_final.pt".format(cfg.name))
 
 
 if __name__ == '__main__':
