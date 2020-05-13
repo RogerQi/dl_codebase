@@ -10,13 +10,15 @@ Dependencies
 - PIL
 
 TODOs
+- Support for better Logging/Timing (tensorboard?)
+- Pack the modules folder as a package to get rid of sys.path tricks
+- Decouple backbone
 - Support for 2D segmentation task
 - Add better print statement for train summary between epochs
 - Add more options for classifier/dataset/loss/network
     - Classifier
         - Dense
     - Dataset
-        - Cifar10
         - Coco
     - Loss
     - Network
@@ -32,7 +34,6 @@ TODOs
     - crop_size/input_size consistency check
 
 Future TODOs
-- Support for better Logging/Timing (tensorboard?)
 - Add closed-loop experiment logic
     - Use deterministic CUDA Ops from [PyTorch Reproducibility](https://pytorch.org/docs/stable/notes/randomness.html)
     - Fix seeds for all random Ops from [PyTorch Reproducibility](https://pytorch.org/docs/stable/notes/randomness.html)

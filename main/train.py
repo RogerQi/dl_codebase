@@ -22,7 +22,7 @@ def train(cfg, model, classifier, criterion, device, train_loader, optimizer, ep
     model.train()
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
-        optimizer.zero_grad()
+        optimizer.zero_grad() # reset gradient
         if cfg.BACKBONE.forward_need_label:
             # For certain task (e.g. CVAE), the network takes label as inputs
             logits = model(data, target)
