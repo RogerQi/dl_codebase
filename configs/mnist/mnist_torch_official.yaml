@@ -5,13 +5,16 @@ num_classes: 10
 save_model: False
 
 SYSTEM:
-  use_cpu: false
+  use_cpu: False
 
 BACKBONE:
   network: 'lenet'
 
 CLASSIFIER:
   classifier: "fc"
+  FC:
+    bias: False
+    hidden_layers: (128, )
 
 LOSS:
   loss: 'nll_loss'

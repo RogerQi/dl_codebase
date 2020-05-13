@@ -43,7 +43,9 @@ _C.BACKBONE.AUTO_ENCODER.conditional = False
 _C.CLASSIFIER = CN()
 _C.CLASSIFIER.classifier = "none"
 _C.CLASSIFIER.factor = 0
-_C.CLASSIFIER.bias = False
+_C.CLASSIFIER.FC = CN()
+_C.CLASSIFIER.FC.hidden_layers = (1024,)
+_C.CLASSIFIER.FC.bias = False
 
 #######################
 # Loss
