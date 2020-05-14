@@ -3,7 +3,7 @@
 - TASK
     - classification
     - detection
-    - autoencoder
+    - segmentation
 - BACKBONE
     - network
         - dropout_lenet
