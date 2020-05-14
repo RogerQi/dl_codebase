@@ -34,8 +34,6 @@ _C.BACKBONE = CN()
 _C.BACKBONE.network = "dropout_lenet"
 _C.BACKBONE.pretrained_weights = "none"
 _C.BACKBONE.forward_need_label = False
-_C.BACKBONE.AUTO_ENCODER = CN()
-_C.BACKBONE.AUTO_ENCODER.conditional = False
 
 #######################
 # Classification Layer
@@ -43,7 +41,9 @@ _C.BACKBONE.AUTO_ENCODER.conditional = False
 _C.CLASSIFIER = CN()
 _C.CLASSIFIER.classifier = "none"
 _C.CLASSIFIER.factor = 0
-_C.CLASSIFIER.bias = False
+_C.CLASSIFIER.FC = CN()
+_C.CLASSIFIER.FC.hidden_layers = (1024,)
+_C.CLASSIFIER.FC.bias = False
 
 #######################
 # Loss

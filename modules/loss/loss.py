@@ -11,7 +11,16 @@ class cross_entropy(nn.Module):
         self.weight = loss_weight
     
     def forward(self, output, label):
+        output = F.softmax(output, dim = 1)
         return F.cross_entropy(output, label, weight = self.weight)
+
+class nll_loss(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+            
+    def forward(self, output, label):
+        output = F.log_softmax(output, dim = 1)
+        return F.nll_loss(output, label)
 
 class naive_VAE(nn.Module):
     def __init__(self, cfg):

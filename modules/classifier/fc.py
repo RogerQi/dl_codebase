@@ -1,19 +1,17 @@
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 class net(nn.Module):
-    def __init__(self, cfg):
+    def __init__(self, cfg, feature_size):
         super(net, self).__init__()
-        input_size = np.prod(cfg.input_dim)
         output_size = cfg.num_classes
-        latent_space_dim = [128, 32]
-        latent_space_dim = [input_size] + latent_space_dim
+        latent_space_dim = list(cfg.CLASSIFIER.FC.hidden_layers)
+        latent_space_dim = [feature_size] + latent_space_dim
         latent_space_dim = latent_space_dim + [output_size]
         net_list = []
         for i in range(len(latent_space_dim) - 1):
-            net_list.append(nn.Linear(latent_space_dim[i], latent_space_dim[i + 1]))
+            net_list.append(nn.Linear(latent_space_dim[i], latent_space_dim[i + 1], bias = cfg.CLASSIFIER.FC.bias))
             if i != len(latent_space_dim) - 2:
                 net_list.append(nn.ReLU())
         print(net_list)
