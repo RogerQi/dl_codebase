@@ -5,18 +5,9 @@ import torch.nn.functional as F
 def dispatcher(cfg, feature_size):
     classifier_name = cfg.CLASSIFIER.classifier
     assert classifier_name != "none"
-    if classifier_name == "identity":
-        assert cfg.task == "auto_encoder"
-        def identity_func(x):
-            return x
-        return identity_func
-    elif classifier_name == "fc":
+    if classifier_name == "fc":
         import classifier.fc as fc
         fc_classifier = fc.net(cfg, feature_size)
         return fc_classifier
-    elif classifier_name == "softmax":
-        def softmax_wrapper(x):
-            return F.softmax(x, dim = 1)
-        return softmax_wrapper
     else:
         raise NotImplementedError
