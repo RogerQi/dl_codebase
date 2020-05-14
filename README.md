@@ -13,6 +13,8 @@ TODOs
 - Support for better Logging/Timing (tensorboard?)
 - Pack the modules folder as a package to get rid of sys.path tricks
 - Decouple backbone
+    - Add engine
+    - Use decorator and adapt detectron registry for better style
 - Support for 2D segmentation task
 - Add better print statement for train summary between epochs
 - Add more options for classifier/dataset/loss/network
