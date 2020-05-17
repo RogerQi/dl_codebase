@@ -15,7 +15,7 @@ _C.name = "Experiment Name"
 _C.seed = 1221
 _C.task = "classification"
 _C.num_classes = -1
-_C.input_dim = (32, 32)
+_C.input_dim = (3, 32, 32)
 _C.save_model = False
 
 #######################

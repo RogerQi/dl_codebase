@@ -89,7 +89,9 @@ def main():
     # --------------------------
     backbone_net = backbone.dispatcher(cfg)
     backbone_net = backbone_net(cfg).to(device)
-    feature_size = backbone_net.get_feature_size()
+    feature_size = backbone_net.get_feature_size(device)
+
+    print("Flatten eature length: {}".format(feature_size))
 
     post_processor = classifier.dispatcher(cfg, feature_size)
     post_processor = post_processor.to(device)

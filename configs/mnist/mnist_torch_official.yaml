@@ -1,6 +1,6 @@
 name: 'pytorch_mnist_lenet'
 task: 'classification'
-input_dim: (28, 28)
+input_dim: (1, 28, 28)
 num_classes: 10
 save_model: False
 
