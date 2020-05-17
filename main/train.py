@@ -78,6 +78,9 @@ def main():
     # --------------------------
     train_set, test_set = dataset.dispatcher(cfg)
 
+    print("Training set contains {} data points.".format(len(train_set)))
+    print("Test/Val set contains {} data points.".format(len(test_set)))
+
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=cfg.TRAIN.batch_size, shuffle=True, **kwargs)
     test_loader = torch.utils.data.DataLoader(test_set, batch_size=cfg.TEST.batch_size, shuffle=True, **kwargs)
 

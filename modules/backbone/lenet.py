@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .backbone_base import backbone_base
-from utils import conv_output_shape
 
 class net(backbone_base):
     '''

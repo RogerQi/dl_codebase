@@ -1,0 +1,40 @@
+name: 'cifar10_lenet'
+task: 'classification'
+input_dim: (3, 32, 32)
+num_classes: 10
+save_model: False
+
+SYSTEM:
+  use_cpu: False
+
+BACKBONE:
+  network: 'resnet18'
+
+CLASSIFIER:
+  classifier: "fc"
+  FC:
+    bias: False
+    hidden_layers: ()
+
+LOSS:
+  loss: 'nll_loss'
+
+DATASET:
+  dataset: 'cifar10'
+  TRANSFORM:
+    TRAIN:
+      transforms: ('random_crop', 'random_horizontal_flip')
+    TEST:
+      transforms: ('none', )
+
+TRAIN:
+  max_epochs: 100
+  batch_size: 128
+  initial_lr: 0.1
+  lr_scheduler: "step_down"
+  step_down_gamma: 0.1
+  step_down_on_epoch: [70, 80]
+
+
+TEST:
+  batch_size: 1000
