@@ -12,6 +12,7 @@ class net(backbone_base):
     '''
     def __init__(self, cfg):
         super(net, self).__init__(cfg)
+        in_channel = cfg.input_dim[0]
         self.conv1 = nn.Conv2d(in_channel, 32, 3, 1)
         self.conv2 = nn.Conv2d(32, 64, 3, 1)
 

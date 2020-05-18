@@ -202,14 +202,10 @@ class ResNet(backbone_base):
 def resnet18(cfg, **kwargs):
     r"""ResNet-18 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_
-
-    Args:
-        pretrained (bool): If True, returns a model pre-trained on ImageNet
-        progress (bool): If True, displays a progress bar of the download to stderr
     """
     return ResNet(cfg, BasicBlock, [2, 2, 2, 2], **kwargs)
 
-def resnet34(**kwargs):
+def resnet34(cfg, **kwargs):
     r"""ResNet-34 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_
 
@@ -219,7 +215,7 @@ def resnet34(**kwargs):
     """
     return ResNet(cfg, BasicBlock, [3, 4, 6, 3], **kwargs)
 
-def resnet50(**kwargs):
+def resnet50(cfg, **kwargs):
     r"""ResNet-50 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_
 
@@ -230,7 +226,7 @@ def resnet50(**kwargs):
     return ResNet(cfg, Bottleneck, [3, 4, 6, 3], **kwargs)
 
 
-def resnet101(**kwargs):
+def resnet101(cfg, **kwargs):
     r"""ResNet-101 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_
 
@@ -240,7 +236,7 @@ def resnet101(**kwargs):
     """
     return ResNet(cfg, Bottleneck, [3, 4, 23, 3], **kwargs)
 
-def resnet152(**kwargs):
+def resnet152(cfg, **kwargs):
     r"""ResNet-152 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_
 
@@ -250,7 +246,7 @@ def resnet152(**kwargs):
     """
     return ResNet(cfg, Bottleneck, [3, 8, 36, 3], **kwargs)
 
-def resnext50_32x4d(**kwargs):
+def resnext50_32x4d(cfg, **kwargs):
     r"""ResNeXt-50 32x4d model from
     `"Aggregated Residual Transformation for Deep Neural Networks" <https://arxiv.org/pdf/1611.05431.pdf>`_
 
@@ -262,7 +258,7 @@ def resnext50_32x4d(**kwargs):
     kwargs['width_per_group'] = 4
     return ResNet(cfg, Bottleneck, [3, 4, 6, 3], **kwargs)
 
-def resnext101_32x8d(**kwargs):
+def resnext101_32x8d(cfg, **kwargs):
     r"""ResNeXt-101 32x8d model from
     `"Aggregated Residual Transformation for Deep Neural Networks" <https://arxiv.org/pdf/1611.05431.pdf>`_
 
@@ -274,7 +270,7 @@ def resnext101_32x8d(**kwargs):
     kwargs['width_per_group'] = 8
     return ResNet(cfg, Bottleneck, [3, 4, 23, 3], **kwargs)
 
-def wide_resnet50_2(pretrained=False, progress=True, **kwargs):
+def wide_resnet50_2(cfg, **kwargs):
     r"""Wide ResNet-50-2 model from
     `"Wide Residual Networks" <https://arxiv.org/pdf/1605.07146.pdf>`_
 
@@ -290,7 +286,7 @@ def wide_resnet50_2(pretrained=False, progress=True, **kwargs):
     kwargs['width_per_group'] = 64 * 2
     return ResNet(cfg, Bottleneck, [3, 4, 6, 3], **kwargs)
 
-def wide_resnet101_2(pretrained=False, progress=True, **kwargs):
+def wide_resnet101_2(cfg, **kwargs):
     r"""Wide ResNet-101-2 model from
     `"Wide Residual Networks" <https://arxiv.org/pdf/1605.07146.pdf>`_
 

@@ -8,7 +8,7 @@ SYSTEM:
   use_cpu: False
 
 BACKBONE:
-  network: 'resnet18'
+  network: 'resnet32_cifar'
 
 CLASSIFIER:
   classifier: "fc"
@@ -23,9 +23,17 @@ DATASET:
   dataset: 'cifar10'
   TRANSFORM:
     TRAIN:
-      transforms: ('random_crop', 'random_horizontal_flip')
+      transforms: ('random_crop', 'random_horizontal_flip', 'normalize')
+      TRANSFORMS_DETAILS:
+        NORMALIZE:
+          mean: (0.4914, 0.4822, 0.4465)
+          sd: (0.2023, 0.1994, 0.2010)
     TEST:
-      transforms: ('none', )
+      transforms: ('normalize',)
+      TRANSFORMS_DETAILS:
+        NORMALIZE:
+          mean: (0.4914, 0.4822, 0.4465)
+          sd: (0.2023, 0.1994, 0.2010)
 
 TRAIN:
   max_epochs: 200

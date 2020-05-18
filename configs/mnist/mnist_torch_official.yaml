@@ -17,7 +17,7 @@ CLASSIFIER:
     hidden_layers: (128, )
 
 LOSS:
-  loss: 'nll_loss'
+  loss: 'cross_entropy'
 
 DATASET:
   dataset: 'mnist'

@@ -17,15 +17,23 @@ CLASSIFIER:
     hidden_layers: (128, )
 
 LOSS:
-  loss: 'nll_loss'
+  loss: 'cross_entropy'
 
 DATASET:
   dataset: 'cifar10'
   TRANSFORM:
     TRAIN:
-      transforms: ('random_crop', 'random_horizontal_flip')
+      transforms: ('random_crop', 'random_horizontal_flip', 'normalize')
+      TRANSFORMS_DETAILS:
+        NORMALIZE:
+          mean: (0.4914, 0.4822, 0.4465)
+          sd: (0.2023, 0.1994, 0.2010)
     TEST:
-      transforms: ('none', )
+      transforms: ('normalize', )
+      TRANSFORMS_DETAILS:
+        NORMALIZE:
+          mean: (0.4914, 0.4822, 0.4465)
+          sd: (0.2023, 0.1994, 0.2010)
 
 TRAIN:
   max_epochs: 14
@@ -34,6 +42,8 @@ TRAIN:
   lr_scheduler: "step_down"
   step_down_gamma: 0.7
   step_down_on_epoch: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+  OPTIMIZER:
+    type: 'adadelta'
 
 
 TEST:

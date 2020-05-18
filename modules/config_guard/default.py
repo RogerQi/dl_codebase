@@ -63,7 +63,10 @@ _C.TRAIN.lr_scheduler = 'none'
 _C.TRAIN.step_down_gamma = 0.1
 _C.TRAIN.step_down_on_epoch = []
 _C.TRAIN.max_epochs = 100
-_C.TRAIN.optimizer = 'none'
+_C.TRAIN.OPTIMIZER = CN()
+_C.TRAIN.OPTIMIZER.type = 'SGD'
+_C.TRAIN.OPTIMIZER.momentum = 0.9
+_C.TRAIN.OPTIMIZER.weight_decay = 1e-4
 
 #######################
 # Validation Settings
