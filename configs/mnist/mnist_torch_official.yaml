@@ -42,6 +42,8 @@ TRAIN:
   lr_scheduler: "step_down"
   step_down_gamma: 0.7
   step_down_on_epoch: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+  OPTIMIZER:
+    type: "adadelta"
 
 
 TEST:
