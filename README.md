@@ -22,8 +22,6 @@ TODOs
     - Dataset
         - Coco
     - Loss
-    - Network
-        - Resnet
 - Update README docs in each folder
 - Add model saving logic
     - Computation Graph + Weights
