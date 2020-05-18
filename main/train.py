@@ -23,16 +23,19 @@ def train(cfg, model, post_processor, criterion, device, train_loader, optimizer
     post_processor.train()
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
-        optimizer.zero_grad() # reset gradient
         feature = model(data)
         output = post_processor(feature)
         loss = criterion(output, target)
+        optimizer.zero_grad() # reset gradient
         loss.backward()
         optimizer.step()
+        pred = output.argmax(dim = 1, keepdim = True)
+        correct_prediction = pred.eq(target.view_as(pred)).sum().item()
+        batch_acc = correct_prediction / data.shape[0]
         if batch_idx % cfg.TRAIN.log_interval == 0:
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+            print('Train Epoch: {0} [{1}/{2} ({3:.0f}%)]\tLoss: {4:.6f}\tBatch Acc: {5:.6f}'.format(
                 epoch, batch_idx * len(data), len(train_loader.dataset),
-                100. * batch_idx / len(train_loader), loss.item()))
+                100. * batch_idx / len(train_loader), loss.item(), batch_acc))
 
 
 def test(cfg, model, post_processor, criterion, device, test_loader):
@@ -78,6 +81,9 @@ def main():
     # --------------------------
     train_set, test_set = dataset.dispatcher(cfg)
 
+    print("Training set contains {} data points.".format(len(train_set)))
+    print("Test/Val set contains {} data points.".format(len(test_set)))
+
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=cfg.TRAIN.batch_size, shuffle=True, **kwargs)
     test_loader = torch.utils.data.DataLoader(test_set, batch_size=cfg.TEST.batch_size, shuffle=True, **kwargs)
 
@@ -89,7 +95,9 @@ def main():
     # --------------------------
     backbone_net = backbone.dispatcher(cfg)
     backbone_net = backbone_net(cfg).to(device)
-    feature_size = backbone_net.get_feature_size()
+    feature_size = backbone_net.get_feature_size(device)
+
+    print("Flatten eature length: {}".format(feature_size))
 
     post_processor = classifier.dispatcher(cfg, feature_size)
     post_processor = post_processor.to(device)
@@ -98,11 +106,24 @@ def main():
 
     trainable_params = list(backbone_net.parameters()) + list(post_processor.parameters())
 
-    optimizer = optim.Adadelta(trainable_params, lr = cfg.TRAIN.initial_lr)
+    if cfg.TRAIN.OPTIMIZER.type == "adadelta":
+        optimizer = optim.Adadelta(trainable_params, lr = cfg.TRAIN.initial_lr,
+                                    weight_decay = cfg.TRAIN.OPTIMIZER.weight_decay)
+    elif cfg.TRAIN.OPTIMIZER.type == "SGD":
+        optimizer = optim.SGD(trainable_params, lr = cfg.TRAIN.initial_lr, momentum = cfg.TRAIN.OPTIMIZER.momentum,
+                                weight_decay = cfg.TRAIN.OPTIMIZER.weight_decay, nesterov = True)
+    elif cfg.TRAIN.OPTIMIZER.type == "ADAM":
+        optimizer = optim.Adam(trainable_params, lr = cfg.TRAIN.initial_lr, betas = (0.9, 0.999),
+                                weight_decay = cfg.TRAIN.OPTIMIZER.weight_decay)
+    else:
+        raise NotImplementedError("Got unsupported optimizer: {}".format(cfg.TRAIN.OPTIMIZER.type))
 
     # Prepare LR scheduler
     if cfg.TRAIN.lr_scheduler == "step_down":
-        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, cfg.TRAIN.step_down_on_epoch, cfg.TRAIN.step_down_gamma)
+        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones = cfg.TRAIN.step_down_on_epoch,
+                                                            gamma = cfg.TRAIN.step_down_gamma)
+    else:
+        raise NotImplementedError("Got unsupported scheduler: {}".format(cfg.TRAIN.lr_scheduler))
 
     for epoch in range(1, cfg.TRAIN.max_epochs + 1):
         train(cfg, backbone_net, post_processor, criterion, device, train_loader, optimizer, epoch)
