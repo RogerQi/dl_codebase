@@ -17,8 +17,6 @@ TODOs
 - Support for 2D segmentation task
 - Add better print statement for train summary between epochs
 - Add more options for classifier/dataset/loss/network
-    - Classifier
-        - Dense
     - Dataset
         - Coco
     - Loss
