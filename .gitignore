@@ -5,6 +5,7 @@
 *.pt
 *.mp4
 *.avi
+*.bak
 
 # Jupyter Notebook
 .ipynb_checkpoints
