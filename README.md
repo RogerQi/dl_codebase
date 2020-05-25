@@ -18,9 +18,10 @@ TODOs
 - Support for more components
     - Dataset
         - ADE20K
+        - On COCO, add an option to disable penalizing crowded segmentation
     - Loss
         - Focal Loss
-        - Imbalanced Loss
+        - More Imbalanced Loss/or combiner
 - Update README docs in each folder
 - Add model saving logic
     - Computation Graph + Weights
