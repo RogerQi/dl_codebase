@@ -106,7 +106,7 @@ class unet_upsample(nn.Module):
         assert x.shape[1] == skip_tensor.shape[1]
         B, C, H, W = skip_tensor.shape
         if self.bilinear:
-            x = F.upsample(x, size = (H, W), mode = 'bilinear')
+            x = F.interpolate(x, size = (H, W), mode = 'bilinear')
         else:
             x = self.upsample_conv(x)
 
