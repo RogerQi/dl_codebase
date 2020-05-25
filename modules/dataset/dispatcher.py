@@ -8,6 +8,8 @@ def dispatcher(cfg):
         raise NotImplementedError
     elif dataset_name == "numpy":
         from .generic_np_dataset import get_train_set, get_val_set
+    elif dataset_name == "coco2017":
+        from .coco import get_train_set, get_val_set
     else:
         raise NotImplementedError
     return [get_train_set(cfg), get_val_set(cfg)]
