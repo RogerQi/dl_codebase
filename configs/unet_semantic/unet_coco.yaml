@@ -1,0 +1,59 @@
+name: 'pytorch_coco2017_unet'
+task: 'semantic_segmentation'
+input_dim: (3, 224, 224)
+num_classes: 201
+save_model: True
+
+SYSTEM:
+  use_cpu: False
+  pin_memory: True
+  num_gpus: 1
+  num_workers: 4
+
+NETWORK:
+  network: 'unet'
+
+BACKBONE:
+  use_pretrained: False
+  pretrained_path: "/home/roger/dl_codebase/unet_coco2017_epoch3.pt"
+
+CLASSIFIER:
+  classifier: "identity"
+
+LOSS:
+  loss: 'cross_entropy'
+
+DATASET:
+  dataset: 'coco2017'
+  TRANSFORM:
+    TRAIN:
+      transforms: ('normalize', )
+      joint_transforms: ('joint_random_crop', )
+      TRANSFORMS_DETAILS:
+        NORMALIZE:
+          mean: (0.4700, 0.4468, 0.4076)
+          sd: (0.2439, 0.2390, 0.2420)
+        crop_size: (224, 224)
+    TEST:
+      transforms: ('normalize', )
+      joint_transforms: ('joint_random_crop', )
+      TRANSFORMS_DETAILS:
+        NORMALIZE:
+          mean: (0.4700, 0.4468, 0.4076)
+          sd: (0.2439, 0.2390, 0.2420)
+        crop_size: (224, 224)
+
+TRAIN:
+  max_epochs: 14
+  batch_size: 8
+  log_interval: 1
+  initial_lr: 0.01
+  lr_scheduler: "step_down"
+  step_down_gamma: 0.1
+  step_down_on_epoch: [4, 6]
+  OPTIMIZER:
+    type: "adadelta"
+
+
+TEST:
+  batch_size: 8
