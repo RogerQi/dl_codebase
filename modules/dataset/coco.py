@@ -66,7 +66,7 @@ def get_val_set(cfg):
     ds = CocoSemantic(
         "../datasets/COCO2017/val2017/",
         "../datasets/COCO2017/annotations/panoptic_val2017.json",
-        "/home/roger/datasets/COCO2017/annotations/panoptic_semantic_train2017/",
+        "/home/roger/datasets/COCO2017/annotations/panoptic_semantic_val2017/",
         transform = transforms.ToTensor()
     )
-    return base_set(ds, "train", cfg)
+    return base_set(ds, "test", cfg)

@@ -2,6 +2,7 @@ import __init_lib_path
 from config_guard import cfg, update_config_from_yaml
 import dataset
 import backbone
+import network
 import classifier
 import loss
 
@@ -9,6 +10,7 @@ import argparse
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 
 def parse_args():
     parser = argparse.ArgumentParser(description = "Roger's Deep Learning Playground")
@@ -29,13 +31,19 @@ def train(cfg, model, post_processor, criterion, device, train_loader, optimizer
         optimizer.zero_grad() # reset gradient
         loss.backward()
         optimizer.step()
-        pred = output.argmax(dim = 1, keepdim = True)
-        correct_prediction = pred.eq(target.view_as(pred)).sum().item()
-        batch_acc = correct_prediction / data.shape[0]
-        if batch_idx % cfg.TRAIN.log_interval == 0:
-            print('Train Epoch: {0} [{1}/{2} ({3:.0f}%)]\tLoss: {4:.6f}\tBatch Acc: {5:.6f}'.format(
-                epoch, batch_idx * len(data), len(train_loader.dataset),
-                100. * batch_idx / len(train_loader), loss.item(), batch_acc))
+        if cfg.task == "classification":
+            pred = output.argmax(dim = 1, keepdim = True)
+            correct_prediction = pred.eq(target.view_as(pred)).sum().item()
+            batch_acc = correct_prediction / data.shape[0]
+            if batch_idx % cfg.TRAIN.log_interval == 0:
+                print('Train Epoch: {0} [{1}/{2} ({3:.0f}%)]\tLoss: {4:.6f}\tBatch Acc: {5:.6f}'.format(
+                    epoch, batch_idx * len(data), len(train_loader.dataset),
+                    100. * batch_idx / len(train_loader), loss.item(), batch_acc))
+        else:
+            if batch_idx % cfg.TRAIN.log_interval == 0:
+                print('Train Epoch: {0} [{1}/{2} ({3:.0f}%)]\tLoss: {4:.6f}'.format(
+                    epoch, batch_idx * len(data), len(train_loader.dataset),
+                    100. * batch_idx / len(train_loader), loss.item()))
 
 
 def test(cfg, model, post_processor, criterion, device, test_loader):
@@ -49,14 +57,20 @@ def test(cfg, model, post_processor, criterion, device, test_loader):
             feature = model(data)
             output = post_processor(feature)
             test_loss += criterion(output, target).item()  # sum up batch loss
-            pred = output.argmax(dim = 1, keepdim = True)
-            correct += pred.eq(target.view_as(pred)).sum().item()
+            if cfg.task == "classification":
+                pred = output.argmax(dim = 1, keepdim = True)
+                correct += pred.eq(target.view_as(pred)).sum().item()
+            else:
+                pass
 
     test_loss /= len(test_loader.dataset)
 
-    print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
-        test_loss, correct, len(test_loader.dataset),
-        100. * correct / len(test_loader.dataset)))
+    if cfg.task == "classification":
+        print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
+            test_loss, correct, len(test_loader.dataset),
+            100. * correct / len(test_loader.dataset)))
+    else:
+        print('\nTest set: Average loss: {:.4f}\n'.format(test_loss))
 
 
 def main():
@@ -70,7 +84,8 @@ def main():
     update_config_from_yaml(cfg, args)
 
     use_cuda = not cfg.SYSTEM.use_cpu
-    device = torch.device("cuda" if use_cuda else "cpu")
+    device_str = "cuda" if use_cuda else "cpu"
+    device = torch.device(device_str)
 
     kwargs = {'num_workers': cfg.SYSTEM.num_workers, 'pin_memory': cfg.SYSTEM.pin_memory} if use_cuda else {}
 
@@ -93,14 +108,25 @@ def main():
     # |  2. Prepare optimizer
     # |  3. Set learning rate
     # --------------------------
-    backbone_net = backbone.dispatcher(cfg)
-    backbone_net = backbone_net(cfg).to(device)
-    feature_size = backbone_net.get_feature_size(device)
+    if cfg.task == "semantic_segmentation":
+        backbone_net = network.dispatcher(cfg)
+        backbone_net = backbone_net(cfg).to(device)
+        assert cfg.CLASSIFIER.classifier == "identity"
+        post_processor = classifier.dispatcher(cfg, -1)
+        post_processor = post_processor.to(device)
+    else:
+        backbone_net = backbone.dispatcher(cfg)
+        backbone_net = backbone_net(cfg).to(device)
+        feature_size = backbone_net.get_feature_size(device)
 
-    print("Flatten eature length: {}".format(feature_size))
+        print("Flatten eature length: {}".format(feature_size))
 
-    post_processor = classifier.dispatcher(cfg, feature_size)
-    post_processor = post_processor.to(device)
+        post_processor = classifier.dispatcher(cfg, feature_size)
+        post_processor = post_processor.to(device)
+    
+    if cfg.BACKBONE.use_pretrained:
+        pretrained_dict = torch.load(cfg.BACKBONE.pretrained_path, map_location = device_str)
+        backbone_net.load_state_dict(pretrained_dict)
 
     criterion = loss.dispatcher(cfg)
 
@@ -129,6 +155,7 @@ def main():
         train(cfg, backbone_net, post_processor, criterion, device, train_loader, optimizer, epoch)
         test(cfg, backbone_net, post_processor, criterion, device, test_loader)
         scheduler.step()
+        torch.save(backbone_net.state_dict(), "unet_coco2017_epoch{0}.pt".format(epoch))
 
     if cfg.save_model:
         torch.save(backbone_net.state_dict(), "{0}_final.pt".format(cfg.name))
