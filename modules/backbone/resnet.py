@@ -103,7 +103,6 @@ class Bottleneck(nn.Module):
 
         return out
 
-
 class ResNet(backbone_base):
     def __init__(self, cfg, block, layers, zero_init_residual=False,
                  groups=1, width_per_group=64, replace_stride_with_dilation=None,

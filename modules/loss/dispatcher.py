@@ -8,5 +8,7 @@ def dispatcher(cfg):
     if loss_name == "cross_entropy":
         from .loss import cross_entropy
         return cross_entropy(cfg)
+    elif loss_name == "binary_cross_entropy":
+        return nn.BCEWithLogitsLoss()
     else:
         raise NotImplementedError

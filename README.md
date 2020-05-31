@@ -14,12 +14,14 @@ TODOs
 - Pack the modules folder as a package to get rid of sys.path tricks
 - Add engine (or core trainer) to abstract trainer for different tasks
 - Adapt registry (as in FAIR detectron 2) and use decorator for better style
-- Support for 2D segmentation task
 - Add better print statement for train summary between epochs
-- Add more options for classifier/dataset/loss/network
+- Support for more components
     - Dataset
-        - Coco
+        - ADE20K
+        - On COCO, add an option to disable penalizing crowded segmentation
     - Loss
+        - Focal Loss
+        - More Imbalanced Loss/or combiner
 - Update README docs in each folder
 - Add model saving logic
     - Computation Graph + Weights
