@@ -4,7 +4,7 @@ numpy==1.18.2
 scipy==1.4.1
 Pillow==5.1.0
 pycocotools==2.0
-PyYAML==3.12
+PyYAML==5.1
 tensorboard==2.1.1
 torch==1.4.0
 torchsummary==1.5.1
