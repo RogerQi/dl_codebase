@@ -40,7 +40,7 @@ class CocoSemantic(datasets.vision.VisionDataset):
         # Get raw image
         raw_img_name = img_name[:-3] + 'jpg'
         img_path = os.path.join(self.root, raw_img_name)
-        img = np.array(Image.open(img_path).convert('RGB'), dtype = np.uint8)
+        img = np.array(Image.open(img_path).convert('RGB'), dtype = np.uint8) # Some images in COCO are gray-scale.
         # Get annotation
         seg_img_path = os.path.join(self.semantic_seg_folder, img_name)
         target = torch.tensor(np.array(Image.open(seg_img_path), dtype=np.int64))
@@ -55,18 +55,18 @@ class CocoSemantic(datasets.vision.VisionDataset):
 
 def get_train_set(cfg):
     ds = CocoSemantic(
-        "../datasets/COCO2017/train2017/",
-        "../datasets/COCO2017/annotations/panoptic_train2017.json",
-        "/home/roger/datasets/COCO2017/annotations/panoptic_semantic_train2017/",
+        "/data/COCO2017/train2017/",
+        "/data/COCO2017/annotations/panoptic_train2017.json",
+        "/data/COCO2017/annotations/panoptic_semantic_train2017/",
         transform = transforms.ToTensor()
     )
     return base_set(ds, "train", cfg)
 
 def get_val_set(cfg):
     ds = CocoSemantic(
-        "../datasets/COCO2017/val2017/",
-        "../datasets/COCO2017/annotations/panoptic_val2017.json",
-        "/home/roger/datasets/COCO2017/annotations/panoptic_semantic_val2017/",
+        "/data/COCO2017/val2017/",
+        "/data/COCO2017/annotations/panoptic_val2017.json",
+        "/data/COCO2017/annotations/panoptic_semantic_val2017/",
         transform = transforms.ToTensor()
     )
     return base_set(ds, "test", cfg)
