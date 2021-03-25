@@ -1,4 +1,4 @@
-name: 'cifar10_lenet'
+name: 'cifar10_resnet18'
 task: 'classification'
 input_dim: (3, 32, 32)
 num_classes: 10
