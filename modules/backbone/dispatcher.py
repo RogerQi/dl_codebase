@@ -9,5 +9,11 @@ def dispatcher(cfg):
     elif network_name == "resnet32_cifar":
         from backbone.resnet_cifar import resnet32
         return resnet32
+    elif network_name == "vgg16":
+        # Note that there is NO batch normalization in this VGG16
+        # implementation, which hurts performance. This is for
+        # consistency with the PANet implementation
+        from backbone.vgg import vgg16
+        return vgg16
     else:
         raise NotImplementedError

@@ -1,4 +1,4 @@
-name: 'cifar10_resnet32'
+name: 'cifar10_vgg16_no_bn'
 task: 'classification'
 input_dim: (3, 32, 32)
 num_classes: 10
@@ -8,7 +8,7 @@ SYSTEM:
   use_cpu: False
 
 BACKBONE:
-  network: 'resnet32_cifar'
+  network: 'vgg16'
 
 CLASSIFIER:
   classifier: "fc"
@@ -36,12 +36,12 @@ DATASET:
           sd: (0.2023, 0.1994, 0.2010)
 
 TRAIN:
-  max_epochs: 200
+  max_epochs: 300
   batch_size: 128
-  initial_lr: 0.1
+  initial_lr: 0.01
   lr_scheduler: "step_down"
-  step_down_gamma: 0.1
-  step_down_on_epoch: [100, 150]
+  step_down_gamma: 0.5
+  step_down_on_epoch: [30, 60, 90, 120, 150, 180, 210, 240, 270]
   OPTIMIZER:
     type: "SGD"
     momentum: 0.9
@@ -49,4 +49,4 @@ TRAIN:
 
 
 TEST:
-  batch_size: 1000
+  batch_size: 500
