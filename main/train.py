@@ -2,7 +2,6 @@ import __init_lib_path
 from config_guard import cfg, update_config_from_yaml
 import dataset
 import backbone
-import network
 import classifier
 import loss
 
@@ -108,21 +107,18 @@ def main():
     # |  2. Prepare optimizer
     # |  3. Set learning rate
     # --------------------------
+    backbone_net = backbone.dispatcher(cfg)
+    backbone_net = backbone_net(cfg).to(device)
     if cfg.task == "semantic_segmentation":
-        backbone_net = network.dispatcher(cfg)
-        backbone_net = backbone_net(cfg).to(device)
-        assert cfg.CLASSIFIER.classifier == "identity"
-        post_processor = classifier.dispatcher(cfg, -1)
-        post_processor = post_processor.to(device)
+        num_channels = backbone_net.get_num_channels(device)
+        print("Backbone num_channels: {}".format(num_channels))
+        post_processor = classifier.dispatcher(cfg, num_channels=num_channels)
     else:
-        backbone_net = backbone.dispatcher(cfg)
-        backbone_net = backbone_net(cfg).to(device)
         feature_size = backbone_net.get_feature_size(device)
-
-        print("Flatten eature length: {}".format(feature_size))
-
-        post_processor = classifier.dispatcher(cfg, feature_size)
-        post_processor = post_processor.to(device)
+        print("Flatten feature length: {}".format(feature_size))
+        post_processor = classifier.dispatcher(cfg, feature_size=feature_size)
+    
+    post_processor = post_processor.to(device)
     
     if cfg.BACKBONE.use_pretrained:
         pretrained_dict = torch.load(cfg.BACKBONE.pretrained_path, map_location = device_str)
