@@ -35,6 +35,7 @@ _C.BACKBONE.network = "none"
 _C.BACKBONE.use_pretrained = False
 _C.BACKBONE.pretrained_path = "none"
 _C.BACKBONE.forward_need_label = False
+_C.BACKBONE.pooling = False
 
 #######################
 # Classification Layer
@@ -45,6 +46,8 @@ _C.CLASSIFIER.factor = 0
 _C.CLASSIFIER.FC = CN()
 _C.CLASSIFIER.FC.hidden_layers = (1024,)
 _C.CLASSIFIER.FC.bias = False
+_C.CLASSIFIER.C1 = CN()
+_C.CLASSIFIER.C1.use_softmax = False
 
 #######################
 # Network (ignore backbone & classification)

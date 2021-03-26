@@ -10,5 +10,8 @@ def dispatcher(cfg):
         return cross_entropy(cfg)
     elif loss_name == "binary_cross_entropy":
         return nn.BCEWithLogitsLoss()
+    elif loss_name == "semantic_nllloss":
+        from .loss import semantic_segmentation_nllloss
+        return semantic_segmentation_nllloss(cfg)
     else:
         raise NotImplementedError
