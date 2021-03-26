@@ -9,6 +9,7 @@ SYSTEM:
 
 BACKBONE:
   network: 'vgg16'
+  pooling: True
 
 CLASSIFIER:
   classifier: "fc"

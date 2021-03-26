@@ -27,29 +27,20 @@ class VGG(backbone_base):
         self,
         cfg,
         features: nn.Module,
-        num_classes: int = 1000,
         init_weights: bool = True
     ) -> None:
         super(VGG, self).__init__(cfg)
+        self.pooling = cfg.BACKBONE.pooling
         self.features = features
-        self.avgpool = nn.AdaptiveAvgPool2d((7, 7))
-        self.classifier = nn.Sequential(
-            nn.Linear(512 * 7 * 7, 4096),
-            nn.ReLU(True),
-            nn.Dropout(),
-            nn.Linear(4096, 4096),
-            nn.ReLU(True),
-            nn.Dropout(),
-            nn.Linear(4096, num_classes),
-        )
+        if self.pooling:
+            self.avgpool = nn.AdaptiveAvgPool2d((7, 7))
         if init_weights:
             self._initialize_weights()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.features(x)
-        x = self.avgpool(x)
-        x = torch.flatten(x, 1)
-        x = self.classifier(x)
+        if self.pooling:
+            x = self.avgpool(x)
         return x
 
     def _initialize_weights(self) -> None:
