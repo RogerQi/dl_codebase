@@ -151,7 +151,8 @@ def main():
         train(cfg, backbone_net, post_processor, criterion, device, train_loader, optimizer, epoch)
         test(cfg, backbone_net, post_processor, criterion, device, test_loader)
         scheduler.step()
-        torch.save(backbone_net.state_dict(), "{0}_epoch{1}.pt".format(cfg.name, epoch))
+        if cfg.save_model:
+            torch.save(backbone_net.state_dict(), "{0}_epoch{1}.pt".format(cfg.name, epoch))
 
     if cfg.save_model:
         torch.save(backbone_net.state_dict(), "{0}_final.pt".format(cfg.name))

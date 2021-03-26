@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class net(nn.Module):
+class fc(nn.Module):
     def __init__(self, cfg, feature_size):
-        super(net, self).__init__()
+        super(fc, self).__init__()
         output_size = cfg.num_classes
         latent_space_dim = list(cfg.CLASSIFIER.FC.hidden_layers)
         latent_space_dim = [feature_size] + latent_space_dim
