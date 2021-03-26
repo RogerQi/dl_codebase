@@ -9,6 +9,8 @@ SYSTEM:
 
 BACKBONE:
   network: 'vgg16'
+  use_pretrained: True
+  pretrained_path: "/data/pretrained_model/vgg16-397923af.pth"
 
 CLASSIFIER:
   classifier: "c1"
