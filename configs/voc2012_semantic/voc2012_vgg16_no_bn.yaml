@@ -1,0 +1,53 @@
+name: 'voc2012_semantic_segmentation_vgg16_no_bn'
+task: 'semantic_segmentation'
+input_dim: (3, 224, 224)
+num_classes: 21 # (20 annotated class + 1 background)
+save_model: False
+
+SYSTEM:
+  use_cpu: False
+
+BACKBONE:
+  network: 'vgg16'
+
+CLASSIFIER:
+  classifier: "c1"
+
+LOSS:
+  loss: 'semantic_nllloss'
+
+DATASET:
+  dataset: 'VOC2012_seg'
+  TRANSFORM:
+    TRAIN:
+      transforms: ('normalize', )
+      joint_transforms: ('joint_random_crop', )
+      TRANSFORMS_DETAILS:
+        NORMALIZE:
+          mean: (0.4700, 0.4468, 0.4076)
+          sd: (0.2439, 0.2390, 0.2420)
+        crop_size: (224, 224)
+    TEST:
+      transforms: ('normalize', )
+      joint_transforms: ('joint_random_crop', )
+      TRANSFORMS_DETAILS:
+        NORMALIZE:
+          mean: (0.4700, 0.4468, 0.4076)
+          sd: (0.2439, 0.2390, 0.2420)
+        crop_size: (224, 224)
+
+TRAIN:
+  max_epochs: 300
+  batch_size: 16
+  initial_lr: 0.001
+  lr_scheduler: "step_down"
+  step_down_gamma: 0.5
+  step_down_on_epoch: [30, 60, 90, 120, 150, 180, 210, 240, 270]
+  OPTIMIZER:
+    type: "SGD"
+    momentum: 0.9
+    weight_decay: 1e-4
+
+
+TEST:
+  batch_size: 32
