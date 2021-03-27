@@ -80,6 +80,7 @@ class BasicBlock(nn.Module):
 class ResNet(backbone_base):
     def __init__(self, cfg, block, num_blocks):
         super(ResNet, self).__init__(cfg)
+        self.pooling = cfg.BACKBONE.pooling
         self.in_planes = 16
 
         self.conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1, bias=False)
@@ -104,8 +105,8 @@ class ResNet(backbone_base):
         out = self.layer1(out)
         out = self.layer2(out)
         out = self.layer3(out)
-        out = F.avg_pool2d(out, out.size()[3])
-        out = out.view(out.size(0), -1)
+        if self.pooling:
+            out = F.avg_pool2d(out, out.size()[3])
         return out
 
 
