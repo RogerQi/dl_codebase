@@ -1,10 +1,13 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 class fc(nn.Module):
-    def __init__(self, cfg, feature_size):
+    def __init__(self, cfg, feature_shape):
         super(fc, self).__init__()
+        assert len(feature_shape) == 4, "Expect B*C*H*W"
+        feature_size = np.prod(feature_shape)
         output_size = cfg.num_classes
         latent_space_dim = list(cfg.CLASSIFIER.FC.hidden_layers)
         latent_space_dim = [feature_size] + latent_space_dim

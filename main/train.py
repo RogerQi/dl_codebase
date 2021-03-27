@@ -115,14 +115,9 @@ def main():
     # --------------------------
     backbone_net = backbone.dispatcher(cfg)
     backbone_net = backbone_net(cfg).to(device)
-    if cfg.task == "semantic_segmentation":
-        num_channels = backbone_net.get_num_channels(device)
-        print("Backbone num_channels: {}".format(num_channels))
-        post_processor = classifier.dispatcher(cfg, num_channels=num_channels)
-    else:
-        feature_size = backbone_net.get_feature_size(device)
-        print("Flatten feature length: {}".format(feature_size))
-        post_processor = classifier.dispatcher(cfg, feature_size=feature_size)
+    feature_shape = backbone_net.get_feature_tensor_shape(device)
+    print("Flatten feature length: {}".format(feature_shape))
+    post_processor = classifier.dispatcher(cfg, feature_shape)
     
     post_processor = post_processor.to(device)
     
