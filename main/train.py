@@ -2,7 +2,6 @@ import __init_lib_path
 from config_guard import cfg, update_config_from_yaml
 import dataset
 import backbone
-import network
 import classifier
 import loss
 
@@ -39,11 +38,13 @@ def train(cfg, model, post_processor, criterion, device, train_loader, optimizer
                 print('Train Epoch: {0} [{1}/{2} ({3:.0f}%)]\tLoss: {4:.6f}\tBatch Acc: {5:.6f}'.format(
                     epoch, batch_idx * len(data), len(train_loader.dataset),
                     100. * batch_idx / len(train_loader), loss.item(), batch_acc))
-        else:
+        elif cfg.task == "semantic_segmentation":
             if batch_idx % cfg.TRAIN.log_interval == 0:
                 print('Train Epoch: {0} [{1}/{2} ({3:.0f}%)]\tLoss: {4:.6f}'.format(
                     epoch, batch_idx * len(data), len(train_loader.dataset),
                     100. * batch_idx / len(train_loader), loss.item()))
+        else:
+            raise NotImplementedError
 
 
 def test(cfg, model, post_processor, criterion, device, test_loader):
@@ -60,8 +61,10 @@ def test(cfg, model, post_processor, criterion, device, test_loader):
             if cfg.task == "classification":
                 pred = output.argmax(dim = 1, keepdim = True)
                 correct += pred.eq(target.view_as(pred)).sum().item()
-            else:
+            elif cfg.task == "semantic_segmentation":
                 pass
+            else:
+                raise NotImplementedError
 
     test_loss /= len(test_loader.dataset)
 
@@ -69,8 +72,10 @@ def test(cfg, model, post_processor, criterion, device, test_loader):
         print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
             test_loss, correct, len(test_loader.dataset),
             100. * correct / len(test_loader.dataset)))
-    else:
+    elif cfg.task == "semantic_segmentation":
         print('\nTest set: Average loss: {:.4f}\n'.format(test_loss))
+    else:
+        raise NotImplementedError
 
 
 def main():
@@ -108,25 +113,24 @@ def main():
     # |  2. Prepare optimizer
     # |  3. Set learning rate
     # --------------------------
+    backbone_net = backbone.dispatcher(cfg)
+    backbone_net = backbone_net(cfg).to(device)
     if cfg.task == "semantic_segmentation":
-        backbone_net = network.dispatcher(cfg)
-        backbone_net = backbone_net(cfg).to(device)
-        assert cfg.CLASSIFIER.classifier == "identity"
-        post_processor = classifier.dispatcher(cfg, -1)
-        post_processor = post_processor.to(device)
+        num_channels = backbone_net.get_num_channels(device)
+        print("Backbone num_channels: {}".format(num_channels))
+        post_processor = classifier.dispatcher(cfg, num_channels=num_channels)
     else:
-        backbone_net = backbone.dispatcher(cfg)
-        backbone_net = backbone_net(cfg).to(device)
         feature_size = backbone_net.get_feature_size(device)
-
-        print("Flatten eature length: {}".format(feature_size))
-
-        post_processor = classifier.dispatcher(cfg, feature_size)
-        post_processor = post_processor.to(device)
+        print("Flatten feature length: {}".format(feature_size))
+        post_processor = classifier.dispatcher(cfg, feature_size=feature_size)
+    
+    post_processor = post_processor.to(device)
     
     if cfg.BACKBONE.use_pretrained:
-        pretrained_dict = torch.load(cfg.BACKBONE.pretrained_path, map_location = device_str)
-        backbone_net.load_state_dict(pretrained_dict)
+        weight_path = cfg.BACKBONE.pretrained_path
+        print("Initializing backbone with pretrained weights from: {}".format(weight_path))
+        pretrained_weight_dict = torch.load(weight_path, map_location=device_str)
+        backbone_net.load_state_dict(pretrained_weight_dict, strict=False)
 
     criterion = loss.dispatcher(cfg)
 
@@ -155,7 +159,8 @@ def main():
         train(cfg, backbone_net, post_processor, criterion, device, train_loader, optimizer, epoch)
         test(cfg, backbone_net, post_processor, criterion, device, test_loader)
         scheduler.step()
-        torch.save(backbone_net.state_dict(), "{0}_epoch{1}.pt".format(cfg.name, epoch))
+        if cfg.save_model:
+            torch.save(backbone_net.state_dict(), "{0}_epoch{1}.pt".format(cfg.name, epoch))
 
     if cfg.save_model:
         torch.save(backbone_net.state_dict(), "{0}_final.pt".format(cfg.name))

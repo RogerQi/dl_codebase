@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from IPython import embed
+
 class cross_entropy(nn.Module):
     '''
     (Optionally) Weighted cross entropy loss
@@ -12,6 +14,21 @@ class cross_entropy(nn.Module):
     
     def forward(self, output, label):
         return F.cross_entropy(output, label, weight = self.weight)
+
+class semantic_segmentation_nllloss(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        self.use_softmax = cfg.CLASSIFIER.C1.use_softmax
+        self.crit = nn.NLLLoss(ignore_index=-1)
+    
+    def forward(self, output, label):
+        if self.use_softmax:
+            raise NotImplementedError
+        else:
+            loss = F.log_softmax(output, dim=1)
+            label = label.long()
+            loss = self.crit(loss, label)
+            return loss
 
 class naive_VAE(nn.Module):
     def __init__(self, cfg):

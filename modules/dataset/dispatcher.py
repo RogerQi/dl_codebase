@@ -12,6 +12,8 @@ def dispatcher(cfg):
         from .coco import get_train_set, get_val_set
     elif dataset_name == "ade20k":
         from .ade20k import get_train_set, get_val_set
+    elif dataset_name == "VOC2012_seg":
+        from .voc2012_seg import get_train_set, get_val_set
     else:
         raise NotImplementedError
     return [get_train_set(cfg), get_val_set(cfg)]
