@@ -4,8 +4,10 @@ import dataset
 import backbone
 import classifier
 import loss
+import utils
 
 import argparse
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -39,10 +41,12 @@ def train(cfg, model, post_processor, criterion, device, train_loader, optimizer
                     epoch, batch_idx * len(data), len(train_loader.dataset),
                     100. * batch_idx / len(train_loader), loss.item(), batch_acc))
         elif cfg.task == "semantic_segmentation":
+            pred_map = output.max(dim = 1)[1]
+            batch_acc, _ = utils.compute_pixel_acc(pred_map, target)
             if batch_idx % cfg.TRAIN.log_interval == 0:
-                print('Train Epoch: {0} [{1}/{2} ({3:.0f}%)]\tLoss: {4:.6f}'.format(
+                print('Train Epoch: {0} [{1}/{2} ({3:.0f}%)]\tLoss: {4:.6f}\tBatch Pixel Acc: {5:.6f}'.format(
                     epoch, batch_idx * len(data), len(train_loader.dataset),
-                    100. * batch_idx / len(train_loader), loss.item()))
+                    100. * batch_idx / len(train_loader), loss.item(), batch_acc))
         else:
             raise NotImplementedError
 
@@ -52,6 +56,9 @@ def test(cfg, model, post_processor, criterion, device, test_loader):
     post_processor.eval()
     test_loss = 0
     correct = 0
+    # TODO: use a more consistent evaluation interface
+    pixel_acc_list = []
+    iou_list = []
     with torch.no_grad():
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
@@ -62,7 +69,12 @@ def test(cfg, model, post_processor, criterion, device, test_loader):
                 pred = output.argmax(dim = 1, keepdim = True)
                 correct += pred.eq(target.view_as(pred)).sum().item()
             elif cfg.task == "semantic_segmentation":
-                pass
+                pred_map = output.max(dim = 1)[1]
+                batch_acc, _ = utils.compute_pixel_acc(pred_map, target)
+                pixel_acc_list.append(float(batch_acc))
+                for i in range(pred_map.shape[0]):
+                    iou = utils.compute_iou(np.array(pred_map[i].cpu()), np.array(target[i].cpu(), dtype=np.int64), cfg.num_classes)
+                    iou_list.append(float(iou))
             else:
                 raise NotImplementedError
 
@@ -73,7 +85,8 @@ def test(cfg, model, post_processor, criterion, device, test_loader):
             test_loss, correct, len(test_loader.dataset),
             100. * correct / len(test_loader.dataset)))
     elif cfg.task == "semantic_segmentation":
-        print('\nTest set: Average loss: {:.4f}\n'.format(test_loss))
+        print('\nTest set: Average loss: {:.4f}, Mean Pixel Accuracy: {:.4f}, Mean IoU {:.4f}\n'.format(
+            test_loss, np.mean(pixel_acc_list), np.mean(iou_list)))
     else:
         raise NotImplementedError
 
