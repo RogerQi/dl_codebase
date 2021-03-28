@@ -168,10 +168,22 @@ def main():
         test(cfg, backbone_net, post_processor, criterion, device, test_loader)
         scheduler.step()
         if cfg.save_model:
-            torch.save(backbone_net.state_dict(), "{0}_epoch{1}.pt".format(cfg.name, epoch))
+            torch.save(
+                {
+                    "backbone": backbone_net.state_dict(),
+                    "head": post_processor.state_dict()
+                },
+                "{0}_epoch{1}.pt".format(cfg.name, epoch)
+            )
 
     if cfg.save_model:
-        torch.save(backbone_net.state_dict(), "{0}_final.pt".format(cfg.name))
+        torch.save(
+                {
+                    "backbone": backbone_net.state_dict(),
+                    "head": post_processor.state_dict()
+                },
+                "{0}_final.pt".format(cfg.name)
+            )
 
 
 if __name__ == '__main__':
