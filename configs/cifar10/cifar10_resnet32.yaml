@@ -9,6 +9,7 @@ SYSTEM:
 
 BACKBONE:
   network: 'resnet32_cifar'
+  pooling: True
 
 CLASSIFIER:
   classifier: "fc"

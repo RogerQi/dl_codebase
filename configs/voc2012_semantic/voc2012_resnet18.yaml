@@ -9,6 +9,7 @@ SYSTEM:
 
 BACKBONE:
   network: 'resnet18'
+  pooling: False
   use_pretrained: True
   pretrained_path: "/data/pretrained_model/resnet18-5c106cde.pth"
 

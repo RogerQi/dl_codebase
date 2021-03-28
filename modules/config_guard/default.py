@@ -90,6 +90,14 @@ _C.TEST = CN()
 _C.TEST.batch_size = 256
 
 #######################
+# Metric Settings
+#######################
+_C.METRIC = CN()
+_C.METRIC.CLASSIFICATION = CN()
+_C.METRIC.SEGMENTATION = CN()
+_C.METRIC.SEGMENTATION.fg_only = True
+
+#######################
 # Dataset Settings
 #######################
 _C.DATASET = CN()

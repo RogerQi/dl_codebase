@@ -12,6 +12,7 @@ class net(backbone_base):
     '''
     def __init__(self, cfg):
         super(net, self).__init__(cfg)
+        self.pooling = cfg.BACKBONE.pooling
         in_channel = cfg.input_dim[0]
         self.conv1 = nn.Conv2d(in_channel, 32, 3, 1)
         self.conv2 = nn.Conv2d(32, 64, 3, 1)
@@ -21,6 +22,6 @@ class net(backbone_base):
         x = F.relu(x)
         x = self.conv2(x)
         x = F.relu(x)
-        x = F.max_pool2d(x, 2)
-        x = torch.flatten(x, 1)
+        if self.pooling:
+            x = F.max_pool2d(x, 2)
         return x

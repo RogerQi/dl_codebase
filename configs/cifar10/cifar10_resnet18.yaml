@@ -9,6 +9,7 @@ SYSTEM:
 
 BACKBONE:
   network: 'resnet18'
+  pooling: True
 
 CLASSIFIER:
   classifier: "fc"

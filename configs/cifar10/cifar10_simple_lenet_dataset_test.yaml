@@ -9,6 +9,7 @@ SYSTEM:
 
 BACKBONE:
   network: 'lenet'
+  pooling: True
 
 CLASSIFIER:
   classifier: "fc"

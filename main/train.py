@@ -4,8 +4,10 @@ import dataset
 import backbone
 import classifier
 import loss
+import utils
 
 import argparse
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -39,10 +41,12 @@ def train(cfg, model, post_processor, criterion, device, train_loader, optimizer
                     epoch, batch_idx * len(data), len(train_loader.dataset),
                     100. * batch_idx / len(train_loader), loss.item(), batch_acc))
         elif cfg.task == "semantic_segmentation":
+            pred_map = output.max(dim = 1)[1]
+            batch_acc, _ = utils.compute_pixel_acc(pred_map, target, fg_only=cfg.METRIC.SEGMENTATION.fg_only)
             if batch_idx % cfg.TRAIN.log_interval == 0:
-                print('Train Epoch: {0} [{1}/{2} ({3:.0f}%)]\tLoss: {4:.6f}'.format(
+                print('Train Epoch: {0} [{1}/{2} ({3:.0f}%)]\tLoss: {4:.6f}\tBatch Pixel Acc: {5:.6f}'.format(
                     epoch, batch_idx * len(data), len(train_loader.dataset),
-                    100. * batch_idx / len(train_loader), loss.item()))
+                    100. * batch_idx / len(train_loader), loss.item(), batch_acc))
         else:
             raise NotImplementedError
 
@@ -52,6 +56,9 @@ def test(cfg, model, post_processor, criterion, device, test_loader):
     post_processor.eval()
     test_loss = 0
     correct = 0
+    # TODO: use a more consistent evaluation interface
+    pixel_acc_list = []
+    iou_list = []
     with torch.no_grad():
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
@@ -62,7 +69,17 @@ def test(cfg, model, post_processor, criterion, device, test_loader):
                 pred = output.argmax(dim = 1, keepdim = True)
                 correct += pred.eq(target.view_as(pred)).sum().item()
             elif cfg.task == "semantic_segmentation":
-                pass
+                pred_map = output.max(dim = 1)[1]
+                batch_acc, _ = utils.compute_pixel_acc(pred_map, target, fg_only=cfg.METRIC.SEGMENTATION.fg_only)
+                pixel_acc_list.append(float(batch_acc))
+                for i in range(pred_map.shape[0]):
+                    iou = utils.compute_iou(
+                        np.array(pred_map[i].cpu()),
+                        np.array(target[i].cpu(), dtype=np.int64),
+                        cfg.num_classes,
+                        fg_only=cfg.METRIC.SEGMENTATION.fg_only
+                    )
+                    iou_list.append(float(iou))
             else:
                 raise NotImplementedError
 
@@ -73,7 +90,8 @@ def test(cfg, model, post_processor, criterion, device, test_loader):
             test_loss, correct, len(test_loader.dataset),
             100. * correct / len(test_loader.dataset)))
     elif cfg.task == "semantic_segmentation":
-        print('\nTest set: Average loss: {:.4f}\n'.format(test_loss))
+        print('\nTest set: Average loss: {:.4f}, Mean Pixel Accuracy: {:.4f}, Mean IoU {:.4f}\n'.format(
+            test_loss, np.mean(pixel_acc_list), np.mean(iou_list)))
     else:
         raise NotImplementedError
 
@@ -115,14 +133,9 @@ def main():
     # --------------------------
     backbone_net = backbone.dispatcher(cfg)
     backbone_net = backbone_net(cfg).to(device)
-    if cfg.task == "semantic_segmentation":
-        num_channels = backbone_net.get_num_channels(device)
-        print("Backbone num_channels: {}".format(num_channels))
-        post_processor = classifier.dispatcher(cfg, num_channels=num_channels)
-    else:
-        feature_size = backbone_net.get_feature_size(device)
-        print("Flatten feature length: {}".format(feature_size))
-        post_processor = classifier.dispatcher(cfg, feature_size=feature_size)
+    feature_shape = backbone_net.get_feature_tensor_shape(device)
+    print("Flatten feature length: {}".format(feature_shape))
+    post_processor = classifier.dispatcher(cfg, feature_shape)
     
     post_processor = post_processor.to(device)
     
@@ -160,10 +173,22 @@ def main():
         test(cfg, backbone_net, post_processor, criterion, device, test_loader)
         scheduler.step()
         if cfg.save_model:
-            torch.save(backbone_net.state_dict(), "{0}_epoch{1}.pt".format(cfg.name, epoch))
+            torch.save(
+                {
+                    "backbone": backbone_net.state_dict(),
+                    "head": post_processor.state_dict()
+                },
+                "{0}_epoch{1}.pt".format(cfg.name, epoch)
+            )
 
     if cfg.save_model:
-        torch.save(backbone_net.state_dict(), "{0}_final.pt".format(cfg.name))
+        torch.save(
+                {
+                    "backbone": backbone_net.state_dict(),
+                    "head": post_processor.state_dict()
+                },
+                "{0}_final.pt".format(cfg.name)
+            )
 
 
 if __name__ == '__main__':
