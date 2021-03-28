@@ -26,9 +26,18 @@ class sbd_seg(datasets.SBDataset):
         return img, torch.tensor(label_np)
 
 def get_train_set(cfg):
-    ds = sbd_seg('/data/sbd', image_set='train_noval', mode="segmentation", download=download_sbd)
+    # Previous works including FCN (https://arxiv.org/pdf/1411.4038.pdf)
+    # or OSLSM (https://arxiv.org/pdf/1709.03410.pdf) use SBD annotations.
+    # The Pascal VOC2012 challenge only has a small subset of images annotated
+    # for semantic segmentation (~1400 in training set and ~1500 in validation set)
+    # while SBD annotates ~11500 images (~8500 in training set and ~2900 in validation)
+    ds = sbd_seg('/data/sbd', image_set='train', mode="segmentation", download=download_sbd)
     return base_set(ds, "train", cfg)
 
 def get_val_set(cfg):
-    ds =  voc2012_seg('/data/', image_set='val', download = download_voc, transform=transforms.ToTensor())
+    ds = voc2012_seg('/data/', image_set='val', download = download_voc, transform=transforms.ToTensor())
+    if len(ds) == 1449:
+        for _ in range(5):
+            print("USING ORIGINAL VOC2012 VAL SET, WHICH INTERSECT WITH SBD")
+            print("RUN utils_main/computer_sbd_voc_val_non_intersect.py TO AVOID THIS")
     return base_set(ds, "test", cfg)
