@@ -8,6 +8,7 @@ import utils
 
 import argparse
 import numpy as np
+import cv2
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -18,11 +19,13 @@ def parse_args():
     parser.add_argument('--cfg', help="specify particular yaml configuration to use", required=True,
         default="configs/mnist_torch_official.taml", type = str)
     parser.add_argument('--load', help="specify saved checkpoint to evaluate", required=True, type=str)
+    parser.add_argument('--visfreq', help="visualize results for every n examples in test set",
+        required=False, default=99999999999, type=int)
     args = parser.parse_args()
 
     return args
 
-def test(cfg, model, post_processor, criterion, device, test_loader, visualize):
+def test(cfg, model, post_processor, criterion, device, test_loader, visfreq):
     model.eval()
     post_processor.eval()
     test_loss = 0
@@ -30,7 +33,7 @@ def test(cfg, model, post_processor, criterion, device, test_loader, visualize):
     pixel_acc_list = []
     iou_list = []
     with torch.no_grad():
-        for data, target in test_loader:
+        for idx, (data, target) in enumerate(test_loader):
             data, target = data.to(device), target.to(device)
             feature = model(data)
             output = post_processor(feature)
@@ -49,6 +52,21 @@ def test(cfg, model, post_processor, criterion, device, test_loader, visualize):
                     target_np = np.array(target[i].cpu(), dtype=np.int64)
                     iou = utils.compute_iou(pred_np, target_np, cfg.num_classes)
                     iou_list.append(float(iou))
+                    if (i + 1) % visfreq == 0:
+                        cv2.imwrite("{}_{}_pred.png".format(idx, i), pred_np)
+                        cv2.imwrite("{}_{}_label.png".format(idx, i), target_np)
+                        # Visualize RGB image as well
+                        ori_rgb_np = np.array(data[i].permute((1, 2, 0)).cpu())
+                        if 'normalize' in cfg.DATASET.TRANSFORM.TEST.transforms:
+                            rgb_mean = cfg.DATASET.TRANSFORM.TEST.TRANSFORMS_DETAILS.NORMALIZE.mean
+                            rgb_sd = cfg.DATASET.TRANSFORM.TEST.TRANSFORMS_DETAILS.NORMALIZE.sd
+                            ori_rgb_np = (ori_rgb_np * rgb_sd) + rgb_mean
+                        assert ori_rgb_np.max() <= 1.1, "Max is {}".format(ori_rgb_np.max())
+                        ori_rgb_np[ori_rgb_np >= 1] = 1
+                        ori_rgb_np = (ori_rgb_np * 255).astype(np.uint8)
+                        # Convert to OpenCV BGR
+                        ori_rgb_np = cv2.cvtColor(ori_rgb_np, cv2.COLOR_RGB2BGR)
+                        cv2.imwrite("{}_{}_ori.jpg".format(idx, i), ori_rgb_np)
             else:
                 raise NotImplementedError
 
@@ -113,7 +131,7 @@ def main():
 
     criterion = loss.dispatcher(cfg)
 
-    test(cfg, backbone_net, post_processor, criterion, device, test_loader, True)
+    test(cfg, backbone_net, post_processor, criterion, device, test_loader, args.visfreq)
 
 
 if __name__ == '__main__':
