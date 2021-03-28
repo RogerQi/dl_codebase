@@ -52,6 +52,9 @@ def train(cfg, model, post_processor, criterion, device, train_loader, optimizer
 
 
 def test(cfg, model, post_processor, criterion, device, test_loader):
+    """
+    Return: a validation metric between 0-1 where 1 is perfect
+    """
     model.eval()
     post_processor.eval()
     test_loss = 0
@@ -86,12 +89,15 @@ def test(cfg, model, post_processor, criterion, device, test_loader):
     test_loss /= len(test_loader.dataset)
 
     if cfg.task == "classification":
-        print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
-            test_loss, correct, len(test_loader.dataset),
-            100. * correct / len(test_loader.dataset)))
+        acc = 100. * correct / len(test_loader.dataset)
+        print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)'.format(
+            test_loss, correct, len(test_loader.dataset), acc))
+        return acc
     elif cfg.task == "semantic_segmentation":
-        print('\nTest set: Average loss: {:.4f}, Mean Pixel Accuracy: {:.4f}, Mean IoU {:.4f}\n'.format(
-            test_loss, np.mean(pixel_acc_list), np.mean(iou_list)))
+        m_iou = np.mean(iou_list)
+        print('\nTest set: Average loss: {:.4f}, Mean Pixel Accuracy: {:.4f}, Mean IoU {:.4f}'.format(
+            test_loss, np.mean(pixel_acc_list), m_iou))
+        return m_iou
     else:
         raise NotImplementedError
 
@@ -134,7 +140,7 @@ def main():
     backbone_net = backbone.dispatcher(cfg)
     backbone_net = backbone_net(cfg).to(device)
     feature_shape = backbone_net.get_feature_tensor_shape(device)
-    print("Flatten feature length: {}".format(feature_shape))
+    print("Backbone output feature tensor shape: {}".format(feature_shape))
     post_processor = classifier.dispatcher(cfg, feature_shape)
     
     post_processor = post_processor.to(device)
@@ -168,18 +174,26 @@ def main():
     else:
         raise NotImplementedError("Got unsupported scheduler: {}".format(cfg.TRAIN.lr_scheduler))
 
+    best_val_metric = 0
+
     for epoch in range(1, cfg.TRAIN.max_epochs + 1):
         train(cfg, backbone_net, post_processor, criterion, device, train_loader, optimizer, epoch)
-        test(cfg, backbone_net, post_processor, criterion, device, test_loader)
+        val_metric = test(cfg, backbone_net, post_processor, criterion, device, test_loader)
         scheduler.step()
-        if cfg.save_model:
-            torch.save(
-                {
-                    "backbone": backbone_net.state_dict(),
-                    "head": post_processor.state_dict()
-                },
-                "{0}_epoch{1}.pt".format(cfg.name, epoch)
-            )
+        if val_metric > best_val_metric:
+            print("Epoch {} New Best Model w/ metric: {}".format(epoch, val_metric))
+            best_val_metric = val_metric
+            if cfg.save_model:
+                best_model_path = "{0}_epoch{1}_{2}.pt".format(cfg.name, epoch, best_val_metric)
+                print("Saving model to {}".format(best_model_path))
+                torch.save(
+                    {
+                        "backbone": backbone_net.state_dict(),
+                        "head": post_processor.state_dict()
+                    },
+                    best_model_path
+                )
+        print("===================================\n")
 
     if cfg.save_model:
         torch.save(
