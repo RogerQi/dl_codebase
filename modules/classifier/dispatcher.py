@@ -17,6 +17,10 @@ def dispatcher(cfg, feature_shape):
         import classifier.c1 as c1
         c1_seghead = c1.c1(cfg, feature_shape)
         return c1_seghead
+    elif classifier_name == "fcn32s":
+        import classifier.fcn as fcn
+        fcn32s_head = fcn.fcn32s(cfg, feature_shape)
+        return fcn32s_head
     elif classifier_name == "identity":
         identity_module = identity_mod()
         return identity_module
