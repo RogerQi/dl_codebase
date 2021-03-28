@@ -45,12 +45,12 @@ def test(cfg, model, post_processor, criterion, device, test_loader, visfreq):
                 # human readable label as filenames
             elif cfg.task == "semantic_segmentation":
                 pred_map = output.max(dim = 1)[1]
-                batch_acc, _ = utils.compute_pixel_acc(pred_map, target)
+                batch_acc, _ = utils.compute_pixel_acc(pred_map, target, fg_only=cfg.METRIC.SEGMENTATION.fg_only)
                 pixel_acc_list.append(float(batch_acc))
                 for i in range(pred_map.shape[0]):
                     pred_np = np.array(pred_map[i].cpu())
                     target_np = np.array(target[i].cpu(), dtype=np.int64)
-                    iou = utils.compute_iou(pred_np, target_np, cfg.num_classes)
+                    iou = utils.compute_iou(pred_np, target_np, cfg.num_classes, fg_only=cfg.METRIC.SEGMENTATION.fg_only)
                     iou_list.append(float(iou))
                     if (i + 1) % visfreq == 0:
                         cv2.imwrite("{}_{}_pred.png".format(idx, i), pred_np)

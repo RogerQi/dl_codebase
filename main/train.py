@@ -42,7 +42,7 @@ def train(cfg, model, post_processor, criterion, device, train_loader, optimizer
                     100. * batch_idx / len(train_loader), loss.item(), batch_acc))
         elif cfg.task == "semantic_segmentation":
             pred_map = output.max(dim = 1)[1]
-            batch_acc, _ = utils.compute_pixel_acc(pred_map, target)
+            batch_acc, _ = utils.compute_pixel_acc(pred_map, target, fg_only=cfg.METRIC.SEGMENTATION.fg_only)
             if batch_idx % cfg.TRAIN.log_interval == 0:
                 print('Train Epoch: {0} [{1}/{2} ({3:.0f}%)]\tLoss: {4:.6f}\tBatch Pixel Acc: {5:.6f}'.format(
                     epoch, batch_idx * len(data), len(train_loader.dataset),
@@ -70,10 +70,15 @@ def test(cfg, model, post_processor, criterion, device, test_loader):
                 correct += pred.eq(target.view_as(pred)).sum().item()
             elif cfg.task == "semantic_segmentation":
                 pred_map = output.max(dim = 1)[1]
-                batch_acc, _ = utils.compute_pixel_acc(pred_map, target)
+                batch_acc, _ = utils.compute_pixel_acc(pred_map, target, fg_only=cfg.METRIC.SEGMENTATION.fg_only)
                 pixel_acc_list.append(float(batch_acc))
                 for i in range(pred_map.shape[0]):
-                    iou = utils.compute_iou(np.array(pred_map[i].cpu()), np.array(target[i].cpu(), dtype=np.int64), cfg.num_classes)
+                    iou = utils.compute_iou(
+                        np.array(pred_map[i].cpu()),
+                        np.array(target[i].cpu(), dtype=np.int64),
+                        cfg.num_classes,
+                        fg_only=cfg.METRIC.SEGMENTATION.fg_only
+                    )
                     iou_list.append(float(iou))
             else:
                 raise NotImplementedError

@@ -3,13 +3,13 @@ import matplotlib.pyplot as plt
 
 from IPython import embed
 
-def compute_pixel_acc(pred, label, foreground_only=True):
+def compute_pixel_acc(pred, label, fg_only=True):
     '''
     pred: BHW
     label: BHW
     '''
     assert pred.shape == label.shape
-    if foreground_only:
+    if fg_only:
         valid = (label >= 0)
         acc_sum = (valid * (pred == label)).sum()
         valid_sum = valid.sum()
@@ -20,7 +20,7 @@ def compute_pixel_acc(pred, label, foreground_only=True):
         acc = float(acc_sum) / (np.prod(pred.shape))
         return acc, 0
 
-def compute_iou(pred_map, label_map, num_classes, foreground_only=True):
+def compute_iou(pred_map, label_map, num_classes, fg_only=True):
     pred_map = np.asarray(pred_map).copy()
     label_map = np.asarray(label_map).copy()
 
@@ -42,7 +42,7 @@ def compute_iou(pred_map, label_map, num_classes, foreground_only=True):
     (area_lab, _) = np.histogram(label_map, bins=num_classes, range=(1, num_classes))
     area_union = area_pred + area_lab - area_intersection
 
-    if foreground_only:
+    if fg_only:
         # Remove first bg channel
         return np.sum(area_intersection[1:]) / (np.sum(area_union[1:]) + 1e-10)
     else:
