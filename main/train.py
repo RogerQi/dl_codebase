@@ -27,7 +27,11 @@ def train(cfg, model, post_processor, criterion, device, train_loader, optimizer
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         feature = model(data)
-        output = post_processor(feature)
+        if cfg.task == "classification":
+            output = post_processor(feature)
+        elif cfg.task == "semantic_segmentation":
+            ori_spatial_res = data.shape[-2:]
+            output = post_processor(feature, ori_spatial_res)
         loss = criterion(output, target)
         optimizer.zero_grad() # reset gradient
         loss.backward()
@@ -66,7 +70,11 @@ def test(cfg, model, post_processor, criterion, device, test_loader):
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
             feature = model(data)
-            output = post_processor(feature)
+            if cfg.task == "classification":
+                output = post_processor(feature)
+            elif cfg.task == "semantic_segmentation":
+                ori_spatial_res = data.shape[-2:]
+                output = post_processor(feature, ori_spatial_res)
             test_loss += criterion(output, target).item()  # sum up batch loss
             if cfg.task == "classification":
                 pred = output.argmax(dim = 1, keepdim = True)
@@ -173,6 +181,8 @@ def main():
                                                             gamma = cfg.TRAIN.step_down_gamma)
     else:
         raise NotImplementedError("Got unsupported scheduler: {}".format(cfg.TRAIN.lr_scheduler))
+    
+    print(cfg)
 
     best_val_metric = 0
 
