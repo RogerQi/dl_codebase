@@ -22,6 +22,8 @@ class semantic_segmentation_nllloss(nn.Module):
         self.crit = nn.NLLLoss(ignore_index=-1)
     
     def forward(self, output, label):
+        assert output.shape[-2:] == label.shape[-2:],\
+            "output: {}; label: {}".format(output.shape[-2:], label.shape[-2:])
         if self.use_softmax:
             raise NotImplementedError
         else:
