@@ -40,8 +40,11 @@ class c1(nn.Module):
         self.conv = SameConvBNReLU(self.prv_channels, intermediate_channels_)
         self.final_conv = nn.Conv2d(intermediate_channels_, self.num_classes, 1, 1)
 
-    def forward(self, x):
+    def forward(self, x, size_=None):
         x = self.conv(x)
         x = self.final_conv(x)
-        x = F.interpolate(x, size = self.img_size, mode = 'bilinear', align_corners=False)
+        img_size = self.img_size
+        if size_ is not None:
+            img_size = size_
+        x = F.interpolate(x, size = img_size, mode = 'bilinear', align_corners=False)
         return x

@@ -61,8 +61,17 @@ def make_layers(cfg: List[Union[str, int]], batch_norm: bool = False) -> nn.Sequ
     layers: List[nn.Module] = []
     in_channels = 3
     for v in cfg:
-        if v == 'M':
+        if v == 'I':
+            # initial layer of VGG backbone from FCN
+            v = 64
+            conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=100)
+            layers += [conv2d, nn.ReLU(inplace=True)]
+            in_channels = v
+        elif v == 'M':
             layers += [nn.MaxPool2d(kernel_size=2, stride=2)]
+        elif v == 'N':
+            # cell mode max pooling from FCN
+            layers += [nn.MaxPool2d(kernel_size=2, stride=2, ceil_mode=True)]
         else:
             v = cast(int, v)
             conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1)
@@ -78,6 +87,7 @@ cfgs: Dict[str, List[Union[str, int]]] = {
     'A': [64, 'M', 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'],
     'B': [64, 64, 'M', 128, 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'],
     'D': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'M', 512, 512, 512, 'M', 512, 512, 512, 'M'],
+    'D_seg': ['I', 64, 'N', 128, 128, 'N', 256, 256, 256, 'N', 512, 512, 512, 'N', 512, 512, 512, 'N'],
     'E': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 256, 'M', 512, 512, 512, 512, 'M', 512, 512, 512, 512, 'M'],
 }
 
@@ -141,6 +151,15 @@ def vgg16(cfg, progress: bool = True, **kwargs: Any) -> VGG:
     """
     return _vgg(cfg, 'vgg16', 'D', False, progress, **kwargs)
 
+def vgg16_seg(cfg, progress: bool = True, **kwargs: Any) -> VGG:
+    r"""VGG 16-layer model (configuration "D")
+    `"Very Deep Convolutional Networks For Large-Scale Image Recognition" <https://arxiv.org/pdf/1409.1556.pdf>`._
+
+    Args:
+        pretrained (bool): If True, returns a model pre-trained on ImageNet
+        progress (bool): If True, displays a progress bar of the download to stderr
+    """
+    return _vgg(cfg, 'vgg16', 'D_seg', False, progress, **kwargs)
 
 def vgg16_bn(cfg, progress: bool = True, **kwargs: Any) -> VGG:
     r"""VGG 16-layer model (configuration "D") with batch normalization

@@ -15,5 +15,8 @@ def dispatcher(cfg):
         # consistency with the PANet implementation
         from backbone.vgg import vgg16
         return vgg16
+    elif network_name == "vgg16_seg":
+        from backbone.vgg import vgg16_seg
+        return vgg16_seg
     else:
         raise NotImplementedError
