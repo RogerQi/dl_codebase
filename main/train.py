@@ -6,6 +6,7 @@ import classifier
 import loss
 import utils
 
+import time
 import argparse
 import numpy as np
 import torch
@@ -37,17 +38,17 @@ def train(cfg, model, post_processor, criterion, device, train_loader, optimizer
         loss.backward()
         optimizer.step()
         if cfg.task == "classification":
-            pred = output.argmax(dim = 1, keepdim = True)
-            correct_prediction = pred.eq(target.view_as(pred)).sum().item()
-            batch_acc = correct_prediction / data.shape[0]
             if batch_idx % cfg.TRAIN.log_interval == 0:
+                pred = output.argmax(dim = 1, keepdim = True)
+                correct_prediction = pred.eq(target.view_as(pred)).sum().item()
+                batch_acc = correct_prediction / data.shape[0]
                 print('Train Epoch: {0} [{1}/{2} ({3:.0f}%)]\tLoss: {4:.6f}\tBatch Acc: {5:.6f}'.format(
                     epoch, batch_idx * len(data), len(train_loader.dataset),
                     100. * batch_idx / len(train_loader), loss.item(), batch_acc))
         elif cfg.task == "semantic_segmentation":
-            pred_map = output.max(dim = 1)[1]
-            batch_acc, _ = utils.compute_pixel_acc(pred_map, target, fg_only=cfg.METRIC.SEGMENTATION.fg_only)
             if batch_idx % cfg.TRAIN.log_interval == 0:
+                pred_map = output.max(dim = 1)[1]
+                batch_acc, _ = utils.compute_pixel_acc(pred_map, target, fg_only=cfg.METRIC.SEGMENTATION.fg_only)
                 print('Train Epoch: {0} [{1}/{2} ({3:.0f}%)]\tLoss: {4:.6f}\tBatch Pixel Acc: {5:.6f}'.format(
                     epoch, batch_idx * len(data), len(train_loader.dataset),
                     100. * batch_idx / len(train_loader), loss.item(), batch_acc))
@@ -159,6 +160,7 @@ def main():
         pretrained_weight_dict = torch.load(weight_path, map_location=device_str)
         backbone_net.load_state_dict(pretrained_weight_dict, strict=False)
 
+
     criterion = loss.dispatcher(cfg)
 
     trainable_params = list(backbone_net.parameters()) + list(post_processor.parameters())
@@ -187,14 +189,18 @@ def main():
     best_val_metric = 0
 
     for epoch in range(1, cfg.TRAIN.max_epochs + 1):
+        start_cp = time.time()
         train(cfg, backbone_net, post_processor, criterion, device, train_loader, optimizer, epoch)
+        print("Training took {:.4f} seconds".format(time.time() - start_cp))
+        start_cp = time.time()
         val_metric = test(cfg, backbone_net, post_processor, criterion, device, test_loader)
+        print("Eval took {:.4f} seconds.".format(time.time() - start_cp))
         scheduler.step()
         if val_metric > best_val_metric:
-            print("Epoch {} New Best Model w/ metric: {}".format(epoch, val_metric))
+            print("Epoch {} New Best Model w/ metric: {:.4f}".format(epoch, val_metric))
             best_val_metric = val_metric
             if cfg.save_model:
-                best_model_path = "{0}_epoch{1}_{2}.pt".format(cfg.name, epoch, best_val_metric)
+                best_model_path = "{0}_epoch{1}_{2:.4f}.pt".format(cfg.name, epoch, best_val_metric)
                 print("Saving model to {}".format(best_model_path))
                 torch.save(
                     {
