@@ -1,11 +1,13 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 class fcn32s(nn.Module):
 
     def __init__(self, cfg, feature_shape):
         super().__init__()
         self.num_classes = cfg.num_classes
+        self.use_bilinear_interpolation = True # TODO: read from cfg
         # fc6
         self.fc6 = nn.Conv2d(512, 4096, 7)
         self.relu6 = nn.ReLU(inplace=True)
@@ -17,7 +19,8 @@ class fcn32s(nn.Module):
         self.drop7 = nn.Dropout2d()
 
         self.score_fr = nn.Conv2d(4096, self.num_classes, 1)
-        self.upscore = nn.ConvTranspose2d(self.num_classes, self.num_classes, 64, stride=32,
+        if not self.use_bilinear_interpolation:
+            self.upscore = nn.ConvTranspose2d(self.num_classes, self.num_classes, 64, stride=32,
                                           bias=False)
 
     def forward(self, x, size_ = None):
@@ -29,7 +32,10 @@ class fcn32s(nn.Module):
 
         x = self.score_fr(x)
 
-        x = self.upscore(x)
-        x = x[:, :, 19:19 + size_[0], 19:19 + size_[1]].contiguous()
+        if self.use_bilinear_interpolation:
+            x = F.interpolate(x, size = size_, mode = 'bilinear', align_corners=False)
+        else:
+            x = self.upscore(x)
+            x = x[:, :, 19:19 + size_[0], 19:19 + size_[1]].contiguous()
 
         return x
