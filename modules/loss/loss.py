@@ -18,19 +18,14 @@ class cross_entropy(nn.Module):
 class semantic_segmentation_nllloss(nn.Module):
     def __init__(self, cfg):
         super().__init__()
-        self.use_softmax = cfg.CLASSIFIER.C1.use_softmax
-        self.crit = nn.NLLLoss(ignore_index=-1)
+        self.crit = nn.CrossEntropyLoss()
     
     def forward(self, output, label):
         assert output.shape[-2:] == label.shape[-2:],\
             "output: {}; label: {}".format(output.shape[-2:], label.shape[-2:])
-        if self.use_softmax:
-            raise NotImplementedError
-        else:
-            loss = F.log_softmax(output, dim=1)
-            label = label.long()
-            loss = self.crit(loss, label)
-            return loss
+        label = label.long()
+        loss = self.crit(output, label)
+        return loss
 
 class naive_VAE(nn.Module):
     def __init__(self, cfg):
