@@ -10,7 +10,7 @@ def compute_pixel_acc(pred, label, fg_only=True):
     '''
     assert pred.shape == label.shape
     if fg_only:
-        valid = (label >= 0)
+        valid = (label > 0)
         acc_sum = (valid * (pred == label)).sum()
         valid_sum = valid.sum()
         acc = float(acc_sum) / (valid_sum + 1e-10)
