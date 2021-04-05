@@ -5,15 +5,16 @@ from torch.autograd import Variable
 from torch.nn.utils.weight_norm import WeightNorm
 
 class pixel_classifier(nn.Module):
-    def __init__(self, cfg, feature_shape, in_channel, weight_norm = False):
+    def __init__(self, cfg, feature_shape, in_channel):
         super().__init__()
         self.num_classes = cfg.num_classes
         self.class_mat = nn.Conv2d(in_channel, self.num_classes, 1, bias = False)
-        self.weight_norm = weight_norm
-        if weight_norm:
+        self.weight_norm = cfg.CLASSIFIER.SEGHEAD.COSINE.weight_norm
+        if self.weight_norm:
             # conv weight shape: (num_classes, in_channel, 1, 1)
             WeightNorm.apply(self.class_mat, 'weight', dim=0)
-        self.scale_factor = 50
+        self.train_scale_factor = cfg.CLASSIFIER.SEGHEAD.COSINE.train_scale_factor
+        self.val_scale_factor = cfg.CLASSIFIER.SEGHEAD.COSINE.val_scale_factor
     
     def forward(self, x):
         '''
@@ -27,7 +28,10 @@ class pixel_classifier(nn.Module):
             class_mat_norm = torch.norm(self.class_mat.weight.data, p=2, dim=1).unsqueeze(1).expand_as(self.class_mat.weight.data)
             self.class_mat.weight.data = self.class_mat.weight.data.div(class_mat_norm + 1e-5)
         cos_dist = self.class_mat(x_normalized)
-        scores = self.scale_factor * (cos_dist) 
+        if self.training:
+            scores = self.train_scale_factor * cos_dist
+        else:
+            scores = self.val_scale_factor * cos_dist
 
         return scores
 

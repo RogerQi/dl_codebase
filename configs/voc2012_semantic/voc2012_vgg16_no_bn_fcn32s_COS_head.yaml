@@ -1,4 +1,4 @@
-name: 'voc2012_semantic_segmentation_vgg16_no_bn'
+name: 'voc2012_semantic_segmentation_vgg16_no_bn_COS_HEAD'
 task: 'semantic_segmentation'
 input_dim: (3, 224, 224)
 num_classes: 21 # (20 annotated class + 1 background)
@@ -16,6 +16,12 @@ BACKBONE:
 
 CLASSIFIER:
   classifier: "fcn32s_cos"
+  SEGHEAD:
+    use_bilinear_interpolation: True
+    COSINE:
+      weight_norm: False
+      train_scale_factor: 50
+      val_scale_factor: 3
 
 LOSS:
   loss: 'semantic_nllloss'
