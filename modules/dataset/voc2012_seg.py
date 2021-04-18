@@ -26,11 +26,15 @@ class sbd_seg(datasets.SBDataset):
         return img, torch.tensor(label_np)
 
 def get_train_set(cfg):
-    # Previous works including FCN (https://arxiv.org/pdf/1411.4038.pdf)
+    # Note 1: previous works including FCN (https://arxiv.org/pdf/1411.4038.pdf)
     # or OSLSM (https://arxiv.org/pdf/1709.03410.pdf) use SBD annotations.
     # The Pascal VOC2012 challenge only has a small subset of images annotated
     # for semantic segmentation (~1400 in training set and ~1500 in validation set)
     # while SBD annotates ~11500 images (~8500 in training set and ~2900 in validation)
+
+    # Note 2: for some reason, torchvision.datasets.SBDataset does not support transform
+    # parameter (which transforms only the image but not the label mask). So we have to
+    # manually implement this method.
     ds = sbd_seg('/data/sbd', image_set='train', mode="segmentation", download=download_sbd)
     return base_set(ds, "train", cfg)
 
