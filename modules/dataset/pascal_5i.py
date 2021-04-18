@@ -1,4 +1,3 @@
-import sys
 import os
 import ntpath
 from PIL import Image
@@ -6,11 +5,17 @@ from scipy.io import loadmat
 import numpy as np
 import torch
 import torchvision
-from torchvision import datasets
-import matplotlib.pyplot as plt
-from tqdm import tqdm, trange
 
-class pascal_5i(datasets.vision.VisionDataset):
+class pascal_5i(torchvision.datasets.vision.VisionDataset):
+    """
+    pascal_5i dataset reader
+
+    Parameters:
+        - root:  root to data folder containing SBD and VOC2012 dataset. See README.md for more details
+        - fold:  folding index as in OSLSM (https://arxiv.org/pdf/1709.03410.pdf)
+        - train: a bool flag to indicate whether L_{train} or L_{test} should be used
+    """
+
     def __init__(self, root, fold, train=True):
         super(pascal_5i, self).__init__(root, None, None, None)
         assert fold >= 0 and fold <= 3
@@ -90,9 +95,17 @@ class pascal_5i(datasets.vision.VisionDataset):
     def __len__(self):
         return len(self.images)
     
-    # Load seg_mask from file_path (supports .mat and .png)
-    def load_seg_mask(self, file_path, meta = False):
-        # Target masks in SBD are stored as matlab .mat; while those in VOC2012 are .png
+    def load_seg_mask(self, file_path):
+        """
+        Load seg_mask from file_path (supports .mat and .png).
+
+        Target masks in SBD are stored as matlab .mat; while those in VOC2012 are .png
+
+        Parameters:
+            - file_path: path to the segmenation file
+        
+        Return: a numpy array of dtype long and element range(0, 21) containing segmentation mask
+        """
         if file_path.endswith('.mat'):
             mat = loadmat(file_path)
             target = Image.fromarray(mat['GTcls'][0]['Segmentation'][0])
@@ -103,10 +116,18 @@ class pascal_5i(datasets.vision.VisionDataset):
         # Annotation in VOC contains 255
         target_np[target_np > 20] = 0
         return target_np
-    
-    # Following OSLSM, we mask pixels not in label set as 0
+
     def set_bg_pixel(self, target_np):
+        """
+        Following OSLSM, we mask pixels not in current label set as 0. e.g., when
+        self.train = True, pixels whose labels are in L_{test} are masked as background
+
+        Parameters:
+            - target_np: segmentation mask (usually returned array from self.load_seg_mask)
         
+        Return:
+            - Offseted and masked segmentation mask
+        """
         if self.train:
             for x in self.val_label_set:
                 target_np[target_np == x] = 0
