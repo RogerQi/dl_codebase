@@ -33,11 +33,14 @@ class base_set(torch.utils.data.Dataset):
             self.cached_dataset = {}
     
     def __getitem__(self, index):
-        if index in self.cached_dataset:
-            data, label = self.cached_dataset[index]
+        if self.data_cache_flag:
+            if index in self.cached_dataset:
+                data, label = self.cached_dataset[index]
+            else:
+                data, label = self.dataset[index]
+                self.cached_dataset[index] = (data, label) # Write to memory
         else:
-            data, label = self.dataset[index] # (data, label)
-            self.cached_dataset[index] = (data, label) # Write to memory
+            data, label = self.dataset[index]
         data = self.data_transforms(data)
         data, label = self.joint_transforms(data, label)
         return (data, label)
