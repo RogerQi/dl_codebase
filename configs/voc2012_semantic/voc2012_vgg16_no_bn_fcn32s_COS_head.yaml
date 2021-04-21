@@ -28,6 +28,7 @@ LOSS:
 
 DATASET:
   dataset: 'VOC2012_seg'
+  cache_all_data: True
   TRANSFORM:
     TRAIN:
       transforms: ('normalize', )

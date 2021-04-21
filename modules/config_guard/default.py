@@ -106,6 +106,7 @@ _C.METRIC.SEGMENTATION.fg_only = True
 #######################
 _C.DATASET = CN()
 _C.DATASET.dataset = 'cifar10'
+_C.DATASET.cache_all_data = False
 _C.DATASET.NUMPY_READER = CN()
 _C.DATASET.NUMPY_READER.train_data_npy_path = "/"
 _C.DATASET.NUMPY_READER.train_label_npy_path = "/"
