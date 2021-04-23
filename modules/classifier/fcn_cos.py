@@ -5,9 +5,9 @@ from torch.autograd import Variable
 from torch.nn.utils.weight_norm import WeightNorm
 
 class pixel_classifier(nn.Module):
-    def __init__(self, cfg, feature_shape, in_channel):
+    def __init__(self, cfg, feature_shape, in_channel, num_classes):
         super().__init__()
-        self.num_classes = cfg.num_classes
+        self.num_classes = num_classes
         self.class_mat = nn.Conv2d(in_channel, self.num_classes, 1, bias = False)
         self.weight_norm = cfg.CLASSIFIER.SEGHEAD.COSINE.weight_norm
         if self.weight_norm:
@@ -43,22 +43,26 @@ class fcn32s_cos(nn.Module):
         # fc6
         self.fc6 = nn.Conv2d(512, 4096, 7)
         self.relu6 = nn.ReLU(inplace=True)
-        self.drop6 = nn.Dropout2d()
 
         # fc7
         self.fc7 = nn.Conv2d(4096, 4096, 1)
-        self.relu7 = nn.ReLU(inplace=True)
-        self.drop7 = nn.Dropout2d()
 
-        self.pixel_classifier = pixel_classifier(cfg, feature_shape, 4096)
+        self.pixel_classifier = pixel_classifier(cfg, feature_shape, 4096, self.num_classes)
 
     def forward(self, x, size_ = None):
+        x = self.logit_forward(x)
+        x = self.cosine_forward(x, size_)
+
+        return x
+    
+    def logit_forward(self, x):
         x = self.relu6(self.fc6(x))
-        x = self.drop6(x)
 
-        x = self.relu7(self.fc7(x))
-        x = self.drop7(x)
+        x = self.fc7(x)
 
+        return x
+    
+    def cosine_forward(self, x, size_ = None):
         x = self.pixel_classifier(x)
 
         # Origianl FCN paper uses transpose Conv to upscale the image
