@@ -20,6 +20,26 @@ def compute_pixel_acc(pred, label, fg_only=True):
         acc = float(acc_sum) / (np.prod(pred.shape))
         return acc, 0
 
+def compute_binary_precision(pred, label):
+    '''
+    pred: BHW
+    label: BHW
+    '''
+    assert pred.shape == label.shape
+    tp = np.logical_and(pred == 1, label == 1).sum()
+    fp = np.logical_and(pred == 1, label == 0).sum()
+    return tp * 1.0 / (tp + fp + 1e-15)
+
+def compute_binary_recall(pred, label):
+    '''
+    pred: BHW
+    label: BHW
+    '''
+    assert pred.shape == label.shape
+    tp = np.logical_and(pred == 1, label == 1).sum()
+    fn = np.logical_and(pred == 0, label == 1).sum()
+    return tp * 1.0 / (tp + fn + 1e-15)
+
 def compute_iou(pred_map, label_map, num_classes, fg_only=True):
     pred_map = np.asarray(pred_map).copy()
     label_map = np.asarray(label_map).copy()
