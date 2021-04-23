@@ -4,10 +4,11 @@ Module containing reader to parse pascal_5i dataset from SBD and VOC2012
 import os
 from PIL import Image
 from scipy.io import loadmat
+from copy import deepcopy
 import numpy as np
 import torch
 import torchvision
-
+from .baseset import base_set
 
 class Pascal5iReader(torchvision.datasets.vision.VisionDataset):
     """
@@ -19,10 +20,11 @@ class Pascal5iReader(torchvision.datasets.vision.VisionDataset):
         - train: a bool flag to indicate whether L_{train} or L_{test} should be used
     """
 
-    def __init__(self, root, fold, train=True):
+    def __init__(self, root, fold, train=True, meta_test=False):
         super(Pascal5iReader, self).__init__(root, None, None, None)
         assert fold >= 0 and fold <= 3
         self.train = train
+        self.meta_test = meta_test
 
         # Define base to SBD and VOC2012
         sbd_base = os.path.join(root, 'sbd')
@@ -82,7 +84,7 @@ class Pascal5iReader(torchvision.datasets.vision.VisionDataset):
         self.val_label_set = [i for i in range(fold * 5 + 1, fold * 5 + 6)]
         self.train_label_set = [i for i in range(
             1, 21) if i not in self.val_label_set]
-        if self.train:
+        if not self.meta_test:
             self.label_set = self.train_label_set
         else:
             self.label_set = self.val_label_set
@@ -93,14 +95,33 @@ class Pascal5iReader(torchvision.datasets.vision.VisionDataset):
         # Find subset of image. This is actually faster than hist
         folded_images = []
         folded_targets = []
+
+        # Given a class, this dict returns list of images containing the class
+        self.class_img_map = {}
+        for label_id, _ in enumerate(self.label_set):
+            self.class_img_map[label_id + 1] = []
+
+        # Given an index of an image, this dict returns list of classes in the image
+        self.img_class_map = {}
+
         for i in range(len(self.images)):
             mask = self.load_seg_mask(self.targets[i])
-            for x in self.label_set:
+            appended_flag = False
+            for label_id, x in enumerate(self.label_set):
                 if x in mask:
-                    # contain at least one pixel in L_{train}
-                    folded_images.append(self.images[i])
-                    folded_targets.append(self.targets[i])
-                    break
+                    if not appended_flag:
+                        # contain at least one pixel in L_{train}
+                        folded_images.append(self.images[i])
+                        folded_targets.append(self.targets[i])
+                        appended_flag = True
+                    cur_img_id = len(folded_images) - 1
+                    cur_class_id = label_id + 1
+                    # This image must be the latest appended image
+                    self.class_img_map[cur_class_id].append(cur_img_id)
+                    if cur_img_id in self.img_class_map:
+                        self.img_class_map[cur_img_id].append(cur_class_id)
+                    else:
+                        self.img_class_map[cur_img_id] = [cur_class_id]
 
         self.images = folded_images
         self.targets = folded_targets
@@ -141,7 +162,7 @@ class Pascal5iReader(torchvision.datasets.vision.VisionDataset):
         Return:
             - Offseted and masked segmentation mask
         """
-        if self.train:
+        if not self.meta_test:
             for x in self.val_label_set:
                 target_np[target_np == x] = 0
             max_val_label = max(self.val_label_set)
@@ -156,6 +177,32 @@ class Pascal5iReader(torchvision.datasets.vision.VisionDataset):
                 target_np[label_mask_idx_map[i]] = i + 1
         return target_np
 
+    def get_img_containing_class(self, class_id):
+        """
+        Given a class label id (e.g., 2), return a list of all images in
+        the dataset containing at least one pixel of the class.
+
+        Parameters:
+            - class_id: an integer representing class
+
+        Return:
+            - a list of all images in the dataset containing at least one pixel of the class
+        """
+        return deepcopy(self.class_img_map[class_id])
+    
+    def get_class_in_an_image(self, img_idx):
+        """
+        Given an image idx (e.g., 123), return the list of classes in
+        the image.
+
+        Parameters:
+            - img_idx: an integer representing image
+
+        Return:
+            - list of classes in the image
+        """
+        return deepcopy(self.img_class_map[img_idx])
+
     def __getitem__(self, idx):
         # For both SBD and VOC2012, images are stored as .jpg
         img = Image.open(self.images[idx]).convert("RGB")
@@ -165,3 +212,13 @@ class Pascal5iReader(torchvision.datasets.vision.VisionDataset):
         target_np = self.set_bg_pixel(target_np)
 
         return img, torch.tensor(target_np)
+
+def get_meta_train_set(cfg):
+    folding = cfg.DATASET.PASCAL5i.folding
+    ds = Pascal5iReader('/data', folding, True)
+    return base_set(ds, "train", cfg)
+
+def get_meta_test_set(cfg):
+    folding = cfg.DATASET.PASCAL5i.folding
+    ds = Pascal5iReader('/data', folding, False, meta_test=True)
+    return base_set(ds, "test", cfg)
