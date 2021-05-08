@@ -1,4 +1,4 @@
-name: 'pascal5i_semantic_segmentation_vgg16_no_bn_COS_HEAD_metatrain'
+name: 'pascal5i_semantic_segmentation_vgg16_no_bn_COS_HEAD_metatrain_fold_3'
 task: 'few_shot_semantic_segmentation_fine_tuning'
 input_dim: (3, 417, 417)
 meta_training_num_classes: 16 # (15 annotated class in splitted training set + 1 background)
@@ -30,7 +30,7 @@ LOSS:
 DATASET:
   dataset: 'pascal_5i'
   PASCAL5i:
-    folding: 0
+    folding: 3
   cache_all_data: True
   TRANSFORM:
     TRAIN:
@@ -64,7 +64,7 @@ TRAIN:
     weight_decay: 1e-5
 
 META_TEST:
-  shot: 5
+  shot: 1
 
 TEST:
   batch_size: 1
