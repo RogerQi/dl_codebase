@@ -213,6 +213,16 @@ class Pascal5iReader(torchvision.datasets.vision.VisionDataset):
 
         return img, torch.tensor(target_np)
 
+def get_train_set(cfg):
+    folding = cfg.DATASET.PASCAL5i.folding
+    ds = Pascal5iReader('/data', folding, True)
+    return base_set(ds, "train", cfg)
+
+def get_val_set(cfg):
+    folding = cfg.DATASET.PASCAL5i.folding
+    ds = Pascal5iReader('/data', folding, False)
+    return base_set(ds, "test", cfg)
+
 def get_meta_train_set(cfg):
     folding = cfg.DATASET.PASCAL5i.folding
     ds = Pascal5iReader('/data', folding, True)
