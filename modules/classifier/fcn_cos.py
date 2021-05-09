@@ -55,6 +55,10 @@ class fcn32s_cos(nn.Module):
 
         return x
     
+    def replace_binary_head(self, cfg, feature_shape):
+        # Use for binary classification
+        self.pixel_classifier = pixel_classifier(cfg, feature_shape, 4096, 2)
+    
     def logit_forward(self, x):
         x = self.relu6(self.fc6(x))
 
