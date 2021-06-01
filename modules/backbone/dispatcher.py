@@ -18,5 +18,11 @@ def dispatcher(cfg):
     elif network_name == "vgg16_seg":
         from backbone.vgg import vgg16_seg
         return vgg16_seg
+    elif network_name == "panet_vgg16":
+        from backbone.panet_vgg import panet_vgg
+        return panet_vgg
+    elif network_name == "refinenet_lw50":
+        from backbone.lw_refinenet import rf_lw50
+        return rf_lw50
     else:
         raise NotImplementedError

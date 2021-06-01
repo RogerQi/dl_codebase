@@ -132,6 +132,8 @@ def main():
     args = parse_args()
     update_config_from_yaml(cfg, args)
 
+    print(cfg)
+
     use_cuda = not cfg.SYSTEM.use_cpu
     device_str = "cuda" if use_cuda else "cpu"
     device = torch.device(device_str)
@@ -169,7 +171,17 @@ def main():
         weight_path = cfg.BACKBONE.pretrained_path
         print("Initializing backbone with pretrained weights from: {}".format(weight_path))
         pretrained_weight_dict = torch.load(weight_path, map_location=device_str)
-        backbone_net.load_state_dict(pretrained_weight_dict, strict=False)
+        if cfg.BACKBONE.network == 'panet_vgg16':
+            keys = list(pretrained_weight_dict.keys())
+            new_dict = backbone_net.state_dict()
+            new_keys = list(new_dict.keys())
+
+            for i in range(26):
+                new_dict[new_keys[i]] = pretrained_weight_dict[keys[i]]
+            
+            backbone_net.load_state_dict(new_dict)
+        else:
+            backbone_net.load_state_dict(pretrained_weight_dict, strict=False)
 
 
     criterion = loss.dispatcher(cfg)
@@ -194,8 +206,6 @@ def main():
                                                             gamma = cfg.TRAIN.step_down_gamma)
     else:
         raise NotImplementedError("Got unsupported scheduler: {}".format(cfg.TRAIN.lr_scheduler))
-    
-    print(cfg)
 
     best_val_metric = 0
 
