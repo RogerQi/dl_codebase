@@ -1,7 +1,8 @@
 import random
 import numpy as np
 import torch
-import torch.nn.functional as F
+import torchvision
+import torchvision.transforms.functional as tr_F
 from .transforms_registry import registry
 
 joint_transforms_registry = registry()
@@ -41,4 +42,33 @@ def joint_random_crop(transforms_cfg):
             return (img[:, i:i + output_H, j:j + output_W], target[i:i + output_H, j:j + output_W])
         else:
             return (img[:, i:i + output_H, j:j + output_W], target[:, i:i + output_H, j:j + output_W])
+    return crop
+
+@joint_transforms_registry.register
+def joint_naive_resize(transforms_cfg):
+    output_H, output_W = transforms_cfg.TRANSFORMS_DETAILS.crop_size
+    size = (output_H, output_W)
+    def crop(img, target):
+        assert img.shape[-2:] == target.shape[-2:]
+        img = tr_F.resize(img, size)
+        if len(target.shape) == 2:
+            # HxW?
+            target = target.reshape((1,) + target.shape)
+            target = tr_F.resize(target, size, interpolation=torchvision.transforms.InterpolationMode.NEAREST)
+            assert target.shape[0] == 1
+            target = target.reshape(target.shape[1:])
+        else:
+            target = tr_F.resize(target, size, interpolation=torchvision.transforms.InterpolationMode.NEAREST)
+        return (img, target)
+    return crop
+
+@joint_transforms_registry.register
+def joint_center_crop(transforms_cfg):
+    output_H, output_W = transforms_cfg.TRANSFORMS_DETAILS.crop_size
+    size = (output_H, output_W)
+    def crop(img, target):
+        assert img.shape[-2:] == target.shape[-2:]
+        img = tr_F.center_crop(img, size)
+        target = tr_F.center_crop(img, size)
+        return (img, target)
     return crop
