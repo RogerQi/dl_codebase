@@ -18,7 +18,7 @@ class cross_entropy(nn.Module):
 class semantic_segmentation_nllloss(nn.Module):
     def __init__(self, cfg):
         super().__init__()
-        self.crit = nn.CrossEntropyLoss()
+        self.crit = nn.CrossEntropyLoss(ignore_index = -1)
     
     def forward(self, output, label):
         assert output.shape[-2:] == label.shape[-2:],\

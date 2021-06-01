@@ -35,44 +35,16 @@ class pixel_classifier(nn.Module):
 
         return scores
 
-class fcn32s_cos(nn.Module):
-
+class seg_cos(nn.Module):
+    # Treat segmentation as a classification problem for every spatial pixel
     def __init__(self, cfg, feature_shape, num_classes):
         super().__init__()
         self.num_classes = num_classes
-        # fc6
-        self.fc6 = nn.Conv2d(feature_shape[1], 4096, 7)
-        self.relu6 = nn.ReLU(inplace=True)
+        self.in_channels = feature_shape[1]
 
-        # fc7
-        self.fc7 = nn.Conv2d(4096, 4096, 1)
-
-        self.pixel_classifier = pixel_classifier(cfg, feature_shape, 4096, self.num_classes)
-
+        self.pixel_classifier = pixel_classifier(cfg, feature_shape, self.in_channels, self.num_classes)
+    
     def forward(self, x, size_ = None):
-        x = self.logit_forward(x)
-        x = self.cosine_forward(x, size_)
-
-        return x
-    
-    def replace_binary_head(self, cfg, feature_shape):
-        # Use for binary classification
-        self.pixel_classifier = pixel_classifier(cfg, feature_shape, 4096, 2)
-    
-    def logit_forward(self, x):
-        x = self.relu6(self.fc6(x))
-
-        x = self.fc7(x)
-
-        return x
-    
-    def cosine_forward(self, x, size_ = None):
         x = self.pixel_classifier(x)
-
-        # Origianl FCN paper uses transpose Conv to upscale the image
-        # However, experiments showed that it doesn't work well with cosine similarity.
-        # ... So we changed it to bilinear interpolation
-
-        x = F.interpolate(x, size = size_, mode = 'bilinear', align_corners=False)
-
+        x = F.interpolate(x, size = size_, mode = 'bilinear')
         return x

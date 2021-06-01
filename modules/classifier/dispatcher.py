@@ -38,5 +38,13 @@ def dispatcher(cfg, feature_shape, meta_test = False):
     elif classifier_name == "identity":
         identity_module = identity_mod()
         return identity_module
+    elif classifier_name == 'seg_cos':
+        import classifier.seg_cos as seg_cos
+        seg_cos_head = seg_cos.seg_cos(cfg, feature_shape, num_classes)
+        return seg_cos_head
+    elif classifier_name == "plain_c1":
+        import classifier.plain_c1 as plain_c1
+        plain_c1_head = plain_c1.plain_c1(cfg, feature_shape, num_classes)
+        return plain_c1_head
     else:
         raise NotImplementedError
