@@ -20,6 +20,7 @@ class base_set(torch.utils.data.Dataset):
         '''
         assert split in ["train", "test"]
         self.cfg = cfg
+        self.data_cache_flag = cfg.DATASET.cache_all_data
         self.dataset = dataset
         if split == "train":
             transforms_config_node = cfg.DATASET.TRANSFORM.TRAIN
@@ -28,9 +29,18 @@ class base_set(torch.utils.data.Dataset):
         data_trans_ops, joint_trans_ops = dispatcher(transforms_config_node)
         self.data_transforms = self._get_mono_transforms(transforms_config_node, data_trans_ops)
         self.joint_transforms = self._get_joint_transforms(transforms_config_node, joint_trans_ops)
+        if self.data_cache_flag:
+            self.cached_dataset = {}
     
     def __getitem__(self, index):
-        data, label = self.dataset[index] # (data, label)
+        if self.data_cache_flag:
+            if index in self.cached_dataset:
+                data, label = self.cached_dataset[index]
+            else:
+                data, label = self.dataset[index]
+                self.cached_dataset[index] = (data, label) # Write to memory
+        else:
+            data, label = self.dataset[index]
         data = self.data_transforms(data)
         data, label = self.joint_transforms(data, label)
         return (data, label)

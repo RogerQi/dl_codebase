@@ -36,23 +36,32 @@ def test(cfg, model, post_processor, criterion, device, test_loader, visfreq):
         for idx, (data, target) in enumerate(test_loader):
             data, target = data.to(device), target.to(device)
             feature = model(data)
-            output = post_processor(feature)
+            if cfg.task == "classification":
+                output = post_processor(feature)
+            elif cfg.task == "semantic_segmentation" or cfg.task == "few_shot_semantic_segmentation_fine_tuning":
+                ori_spatial_res = data.shape[-2:]
+                output = post_processor(feature, ori_spatial_res)
+            else:
+                raise NotImplementedError
             test_loss += criterion(output, target).item()  # sum up batch loss
             if cfg.task == "classification":
                 pred = output.argmax(dim = 1, keepdim = True)
                 correct += pred.eq(target.view_as(pred)).sum().item()
                 # TODO: save classified images with raw image as content and
                 # human readable label as filenames
-            elif cfg.task == "semantic_segmentation":
+            elif cfg.task == "semantic_segmentation" or cfg.task == "few_shot_semantic_segmentation_fine_tuning":
                 pred_map = output.max(dim = 1)[1]
                 batch_acc, _ = utils.compute_pixel_acc(pred_map, target, fg_only=cfg.METRIC.SEGMENTATION.fg_only)
                 pixel_acc_list.append(float(batch_acc))
                 for i in range(pred_map.shape[0]):
                     pred_np = np.array(pred_map[i].cpu())
                     target_np = np.array(target[i].cpu(), dtype=np.int64)
-                    iou = utils.compute_iou(pred_np, target_np, cfg.num_classes, fg_only=cfg.METRIC.SEGMENTATION.fg_only)
+                    if cfg.task == "semantic_segmentation":
+                        iou = utils.compute_iou(pred_np, target_np, cfg.num_classes, fg_only=cfg.METRIC.SEGMENTATION.fg_only)
+                    else:
+                        iou = utils.compute_iou(pred_np, target_np, cfg.meta_training_num_classes, fg_only=cfg.METRIC.SEGMENTATION.fg_only)
                     iou_list.append(float(iou))
-                    if (i + 1) % visfreq == 0:
+                    if (idx + 1) % visfreq == 0:
                         cv2.imwrite("{}_{}_pred.png".format(idx, i), pred_np)
                         cv2.imwrite("{}_{}_label.png".format(idx, i), target_np)
                         # Visualize RGB image as well
@@ -76,7 +85,7 @@ def test(cfg, model, post_processor, criterion, device, test_loader, visfreq):
         print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
             test_loss, correct, len(test_loader.dataset),
             100. * correct / len(test_loader.dataset)))
-    elif cfg.task == "semantic_segmentation":
+    elif cfg.task == "semantic_segmentation" or cfg.task == "few_shot_semantic_segmentation_fine_tuning":
         print('\nTest set: Average loss: {:.4f}, Mean Pixel Accuracy: {:.4f}, Mean IoU {:.4f}\n'.format(
             test_loss, np.mean(pixel_acc_list), np.mean(iou_list)))
     else:

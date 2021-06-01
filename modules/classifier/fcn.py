@@ -4,9 +4,9 @@ import torch.nn.functional as F
 
 class fcn32s(nn.Module):
 
-    def __init__(self, cfg, feature_shape):
+    def __init__(self, cfg, feature_shape, num_classes):
         super().__init__()
-        self.num_classes = cfg.num_classes
+        self.num_classes = num_classes
         self.use_bilinear_interpolation = cfg.CLASSIFIER.SEGHEAD.use_bilinear_interpolation
         # fc6
         self.fc6 = nn.Conv2d(512, 4096, 7)

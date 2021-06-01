@@ -20,11 +20,41 @@ def compute_pixel_acc(pred, label, fg_only=True):
         acc = float(acc_sum) / (np.prod(pred.shape))
         return acc, 0
 
-def compute_iou(pred_map, label_map, num_classes, fg_only=True):
+def compute_binary_precision(pred, label):
+    '''
+    pred: BHW
+    label: BHW
+    '''
+    assert pred.shape == label.shape
+    tp = np.logical_and(pred == 1, label == 1).sum()
+    fp = np.logical_and(pred == 1, label == 0).sum()
+    return tp * 1.0 / (tp + fp + 1e-15)
+
+def compute_binary_recall(pred, label):
+    '''
+    pred: BHW
+    label: BHW
+    '''
+    assert pred.shape == label.shape
+    tp = np.logical_and(pred == 1, label == 1).sum()
+    fn = np.logical_and(pred == 0, label == 1).sum()
+    return tp * 1.0 / (tp + fn + 1e-15)
+
+def compute_iou(pred_map, label_map, num_classes, fg_only=True, ignore_mask=True):
+    """
+    Param
+        - ignore_mask: set to True if there are targets to be ignored. Pixels whose value equal to 255
+            are excluded from benchmarking.
+    """
     pred_map = np.asarray(pred_map).copy()
     label_map = np.asarray(label_map).copy()
 
     assert pred_map.shape == label_map.shape
+
+    if ignore_mask:
+        valid_idx = (label_map != -1)
+        pred_map = pred_map[valid_idx]
+        label_map = label_map[valid_idx]
 
     # When computing intersection, all pixels that are not
     # in the intersection are masked with zeros.

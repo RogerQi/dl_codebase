@@ -15,6 +15,8 @@ _C.name = "Experiment Name"
 _C.seed = 1221
 _C.task = "classification"
 _C.num_classes = -1
+_C.meta_training_num_classes = -1
+_C.meta_testing_num_classes = -1
 _C.input_dim = (3, 32, 32)
 _C.save_model = False
 
@@ -67,7 +69,7 @@ _C.LOSS.loss = "none"
 _C.LOSS.loss_factor = 1.
 
 #######################
-# Training Settings
+# Training Settings (used for both usual training and meta-trainint)
 #######################
 _C.TRAIN = CN()
 _C.TRAIN.log_interval = 10
@@ -81,6 +83,22 @@ _C.TRAIN.OPTIMIZER = CN()
 _C.TRAIN.OPTIMIZER.type = 'SGD'
 _C.TRAIN.OPTIMIZER.momentum = 0.9
 _C.TRAIN.OPTIMIZER.weight_decay = 1e-4
+
+#######################
+# Meta-testing Train Settings
+#######################
+_C.META_TEST = CN()
+_C.META_TEST.log_interval = 10
+_C.META_TEST.shot = -1
+_C.META_TEST.initial_lr = 0.01
+_C.META_TEST.lr_scheduler = 'none'
+_C.META_TEST.step_down_gamma = 0.1
+_C.META_TEST.step_down_on_epoch = []
+_C.META_TEST.max_epochs = 100
+_C.META_TEST.OPTIMIZER = CN()
+_C.META_TEST.OPTIMIZER.type = 'SGD'
+_C.META_TEST.OPTIMIZER.momentum = 0.9
+_C.META_TEST.OPTIMIZER.weight_decay = 1e-4
 
 #######################
 # Validation Settings
@@ -106,12 +124,15 @@ _C.METRIC.SEGMENTATION.fg_only = True
 #######################
 _C.DATASET = CN()
 _C.DATASET.dataset = 'cifar10'
+_C.DATASET.cache_all_data = False
 _C.DATASET.NUMPY_READER = CN()
 _C.DATASET.NUMPY_READER.train_data_npy_path = "/"
 _C.DATASET.NUMPY_READER.train_label_npy_path = "/"
 _C.DATASET.NUMPY_READER.test_data_npy_path = "/"
 _C.DATASET.NUMPY_READER.test_label_npy_path = "/"
 _C.DATASET.NUMPY_READER.mmap = False
+_C.DATASET.PASCAL5i = CN()
+_C.DATASET.PASCAL5i.folding = -1
 
 #######################
 # Transform Settings

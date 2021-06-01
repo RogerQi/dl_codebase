@@ -31,10 +31,10 @@ class SameConvBNReLU(nn.ModuleDict):
         return x
 
 class c1(nn.Module):
-    def __init__(self, cfg, feature_shape, intermediate_channels_=512):
+    def __init__(self, cfg, feature_shape, num_classes, intermediate_channels_=512):
         super(c1, self).__init__()
         assert len(feature_shape) == 4, "Expect B*C*H*W"
-        self.num_classes = cfg.num_classes
+        self.num_classes = num_classes
         self.prv_channels = feature_shape[1]
         self.img_size = cfg.input_dim[-2:]
         self.conv = SameConvBNReLU(self.prv_channels, intermediate_channels_)

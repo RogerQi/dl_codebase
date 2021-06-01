@@ -30,7 +30,7 @@ def train(cfg, model, post_processor, criterion, device, train_loader, optimizer
         feature = model(data)
         if cfg.task == "classification":
             output = post_processor(feature)
-        elif cfg.task == "semantic_segmentation":
+        elif cfg.task == "semantic_segmentation" or cfg.task == "few_shot_semantic_segmentation_fine_tuning":
             ori_spatial_res = data.shape[-2:]
             output = post_processor(feature, ori_spatial_res)
         loss = criterion(output, target)
@@ -45,7 +45,7 @@ def train(cfg, model, post_processor, criterion, device, train_loader, optimizer
                 print('Train Epoch: {0} [{1}/{2} ({3:.0f}%)]\tLoss: {4:.6f}\tBatch Acc: {5:.6f}'.format(
                     epoch, batch_idx * len(data), len(train_loader.dataset),
                     100. * batch_idx / len(train_loader), loss.item(), batch_acc))
-        elif cfg.task == "semantic_segmentation":
+        elif cfg.task == "semantic_segmentation" or cfg.task == "few_shot_semantic_segmentation_fine_tuning":
             if batch_idx % cfg.TRAIN.log_interval == 0:
                 pred_map = output.max(dim = 1)[1]
                 batch_acc, _ = utils.compute_pixel_acc(pred_map, target, fg_only=cfg.METRIC.SEGMENTATION.fg_only)
@@ -73,7 +73,7 @@ def test(cfg, model, post_processor, criterion, device, test_loader):
             feature = model(data)
             if cfg.task == "classification":
                 output = post_processor(feature)
-            elif cfg.task == "semantic_segmentation":
+            elif cfg.task == "semantic_segmentation" or cfg.task == "few_shot_semantic_segmentation_fine_tuning":
                 ori_spatial_res = data.shape[-2:]
                 output = post_processor(feature, ori_spatial_res)
             test_loss += criterion(output, target).item()  # sum up batch loss
@@ -92,24 +92,35 @@ def test(cfg, model, post_processor, criterion, device, test_loader):
                         fg_only=cfg.METRIC.SEGMENTATION.fg_only
                     )
                     iou_list.append(float(iou))
+            elif cfg.task == "few_shot_semantic_segmentation_fine_tuning":
+                pred_map = output.max(dim = 1)[1]
+                batch_acc, _ = utils.compute_pixel_acc(pred_map, target, fg_only=cfg.METRIC.SEGMENTATION.fg_only)
+                pixel_acc_list.append(float(batch_acc))
+                for i in range(pred_map.shape[0]):
+                    iou = utils.compute_iou(
+                        np.array(pred_map[i].cpu()),
+                        np.array(target[i].cpu(), dtype=np.int64),
+                        cfg.meta_training_num_classes,
+                        fg_only=cfg.METRIC.SEGMENTATION.fg_only
+                    )
+                    iou_list.append(float(iou))
             else:
                 raise NotImplementedError
 
-    test_loss /= len(test_loader.dataset)
+        test_loss /= len(test_loader.dataset)
 
-    if cfg.task == "classification":
-        acc = 100. * correct / len(test_loader.dataset)
-        print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)'.format(
-            test_loss, correct, len(test_loader.dataset), acc))
-        return acc
-    elif cfg.task == "semantic_segmentation":
-        m_iou = np.mean(iou_list)
-        print('\nTest set: Average loss: {:.4f}, Mean Pixel Accuracy: {:.4f}, Mean IoU {:.4f}'.format(
-            test_loss, np.mean(pixel_acc_list), m_iou))
-        return m_iou
-    else:
-        raise NotImplementedError
-
+        if cfg.task == "classification":
+            acc = 100. * correct / len(test_loader.dataset)
+            print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)'.format(
+                test_loss, correct, len(test_loader.dataset), acc))
+            return acc
+        elif cfg.task == "semantic_segmentation" or cfg.task == "few_shot_semantic_segmentation_fine_tuning":
+            m_iou = np.mean(iou_list)
+            print('\nTest set: Average loss: {:.4f}, Mean Pixel Accuracy: {:.4f}, Mean IoU {:.4f}'.format(
+                test_loss, np.mean(pixel_acc_list), m_iou))
+            return m_iou
+        else:
+            raise NotImplementedError
 
 def main():
     # --------------------------
@@ -120,6 +131,8 @@ def main():
     # --------------------------
     args = parse_args()
     update_config_from_yaml(cfg, args)
+
+    print(cfg)
 
     use_cuda = not cfg.SYSTEM.use_cpu
     device_str = "cuda" if use_cuda else "cpu"
@@ -158,7 +171,17 @@ def main():
         weight_path = cfg.BACKBONE.pretrained_path
         print("Initializing backbone with pretrained weights from: {}".format(weight_path))
         pretrained_weight_dict = torch.load(weight_path, map_location=device_str)
-        backbone_net.load_state_dict(pretrained_weight_dict, strict=False)
+        if cfg.BACKBONE.network == 'panet_vgg16':
+            keys = list(pretrained_weight_dict.keys())
+            new_dict = backbone_net.state_dict()
+            new_keys = list(new_dict.keys())
+
+            for i in range(26):
+                new_dict[new_keys[i]] = pretrained_weight_dict[keys[i]]
+            
+            backbone_net.load_state_dict(new_dict)
+        else:
+            backbone_net.load_state_dict(pretrained_weight_dict, strict=False)
 
 
     criterion = loss.dispatcher(cfg)
@@ -183,8 +206,6 @@ def main():
                                                             gamma = cfg.TRAIN.step_down_gamma)
     else:
         raise NotImplementedError("Got unsupported scheduler: {}".format(cfg.TRAIN.lr_scheduler))
-    
-    print(cfg)
 
     best_val_metric = 0
 
