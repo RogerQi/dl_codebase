@@ -92,7 +92,7 @@ class Pascal5iReader(torchvision.datasets.vision.VisionDataset):
         assert len(self.images) == len(self.targets)
         self.to_tensor_func = torchvision.transforms.ToTensor()
 
-        # Find subset of image. This is actually faster than hist
+        # Find subset of image.
         folded_images = []
         folded_targets = []
 
@@ -107,21 +107,50 @@ class Pascal5iReader(torchvision.datasets.vision.VisionDataset):
         for i in range(len(self.images)):
             mask = self.load_seg_mask(self.targets[i])
             appended_flag = False
-            for label_id, x in enumerate(self.label_set):
-                if x in mask:
-                    if not appended_flag:
-                        # contain at least one pixel in L_{train}
-                        folded_images.append(self.images[i])
-                        folded_targets.append(self.targets[i])
-                        appended_flag = True
-                    cur_img_id = len(folded_images) - 1
-                    cur_class_id = label_id + 1
-                    # This image must be the latest appended image
-                    self.class_img_map[cur_class_id].append(cur_img_id)
-                    if cur_img_id in self.img_class_map:
-                        self.img_class_map[cur_img_id].append(cur_class_id)
-                    else:
-                        self.img_class_map[cur_img_id] = [cur_class_id]
+            # This is actually faster than hist
+            # Late night code
+            if train and not meta_test:
+                # This is the logic to test if image contains novel objects. If so, it is excluded.
+                ignore_flag = False
+                for x in self.val_label_set:
+                    if x in mask:
+                        ignore_flag = True
+                        break
+                ignore_flag = False
+                if ignore_flag:
+                    continue
+                else:
+                    for label_id, x in enumerate(self.label_set):
+                        if x in mask:
+                            if not appended_flag:
+                                # contain at least one pixel in L_{train}
+                                folded_images.append(self.images[i])
+                                folded_targets.append(self.targets[i])
+                                appended_flag = True
+                            cur_img_id = len(folded_images) - 1
+                            cur_class_id = label_id + 1
+                            # This image must be the latest appended image
+                            self.class_img_map[cur_class_id].append(cur_img_id)
+                            if cur_img_id in self.img_class_map:
+                                self.img_class_map[cur_img_id].append(cur_class_id)
+                            else:
+                                self.img_class_map[cur_img_id] = [cur_class_id]
+            else:
+                for label_id, x in enumerate(self.label_set):
+                    if x in mask:
+                        if not appended_flag:
+                            # contain at least one pixel in L_{train}
+                            folded_images.append(self.images[i])
+                            folded_targets.append(self.targets[i])
+                            appended_flag = True
+                        cur_img_id = len(folded_images) - 1
+                        cur_class_id = label_id + 1
+                        # This image must be the latest appended image
+                        self.class_img_map[cur_class_id].append(cur_img_id)
+                        if cur_img_id in self.img_class_map:
+                            self.img_class_map[cur_img_id].append(cur_class_id)
+                        else:
+                            self.img_class_map[cur_img_id] = [cur_class_id]
 
         self.images = folded_images
         self.targets = folded_targets
@@ -148,7 +177,7 @@ class Pascal5iReader(torchvision.datasets.vision.VisionDataset):
         target_np = np.array(target, dtype=np.long)
 
         # Annotation in VOC contains 255
-        target_np[target_np > 20] = 0
+        target_np[target_np > 20] = -1
         return target_np
 
     def set_bg_pixel(self, target_np):
@@ -172,9 +201,12 @@ class Pascal5iReader(torchvision.datasets.vision.VisionDataset):
             label_mask_idx_map = []
             for x in self.val_label_set:
                 label_mask_idx_map.append(target_np == x)
+            # handle -1 as ignore mask
+            ignore_mask = (target_np == -1)
             target_np = np.zeros_like(target_np)
             for i in range(len(label_mask_idx_map)):
                 target_np[label_mask_idx_map[i]] = i + 1
+            target_np[ignore_mask] = -1
         return target_np
 
     def get_img_containing_class(self, class_id):
