@@ -6,6 +6,9 @@
 *.mp4
 *.avi
 *.bak
+*.jpg
+*.png
+*.jpeg
 
 # Jupyter Notebook
 .ipynb_checkpoints
