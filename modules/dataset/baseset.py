@@ -1,9 +1,22 @@
+import random
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import transforms
 from .transforms.dispatcher import dispatcher
+
+from IPython import embed
+
+def binary_mask(target_tensor, fg_cls_idx):
+    ignore_mask_idx = (target_tensor == -1)
+    foreground_mask_idx = (target_tensor == fg_cls_idx)
+    # Sanity check to make sure at least one foreground pixel is presented
+    assert foreground_mask_idx.any()
+    target_tensor = torch.zeros_like(target_tensor)
+    target_tensor[foreground_mask_idx] = 1
+    target_tensor[ignore_mask_idx] = -1
+    return target_tensor
 
 class base_set(torch.utils.data.Dataset):
     '''
@@ -20,7 +33,6 @@ class base_set(torch.utils.data.Dataset):
         '''
         assert split in ["train", "test"]
         self.cfg = cfg
-        self.data_cache_flag = cfg.DATASET.cache_all_data
         self.dataset = dataset
         if split == "train":
             transforms_config_node = cfg.DATASET.TRANSFORM.TRAIN
@@ -29,21 +41,43 @@ class base_set(torch.utils.data.Dataset):
         data_trans_ops, joint_trans_ops = dispatcher(transforms_config_node)
         self.data_transforms = self._get_mono_transforms(transforms_config_node, data_trans_ops)
         self.joint_transforms = self._get_joint_transforms(transforms_config_node, joint_trans_ops)
-        if self.data_cache_flag:
-            self.cached_dataset = {}
     
     def __getitem__(self, index):
-        if self.data_cache_flag:
-            if index in self.cached_dataset:
-                data, label = self.cached_dataset[index]
-            else:
-                data, label = self.dataset[index]
-                self.cached_dataset[index] = (data, label) # Write to memory
-        else:
-            data, label = self.dataset[index]
+        data, label = self.dataset[index]
         data = self.data_transforms(data)
         data, label = self.joint_transforms(data, label)
         return (data, label)
+    
+    def episodic_sample(self, n_shot):
+        """
+        Support 1-way few-shot segmentation only right now
+        """
+        assert hasattr(self.dataset, 'get_class_map')
+        assert hasattr(self.dataset, 'visible_labels')
+        assert hasattr(self.dataset, 'invisible_labels')
+        sampled_class_id = random.choice(self.dataset.get_label_range())
+        image_candidates = self.dataset.get_class_map(sampled_class_id)
+
+        # random.sample samples without replacement and is faster than numpy.
+        # 1 query image and n-shot support set.
+        selected_images = random.sample(image_candidates, 1 + n_shot)
+        query_img_chw, query_mask_hw = self[selected_images[0]]
+        supp_img_mask_pairs_list = [self[i] for i in selected_images[1:]]
+        supp_img_bchw, supp_mask_bhw = zip(*supp_img_mask_pairs_list)
+        supp_img_bchw = torch.stack(supp_img_bchw)
+        supp_mask_bhw = torch.stack(supp_mask_bhw)
+
+        # Binary mask
+        query_mask_hw = binary_mask(query_mask_hw, sampled_class_id)
+        supp_mask_bhw = binary_mask(supp_mask_bhw, sampled_class_id)
+
+        return {
+            'sampled_class_id': sampled_class_id,
+            'query_img_bchw': query_img_chw.view((1,) + query_img_chw.shape),
+            'query_mask_bhw': query_mask_hw.view((1,) + query_mask_hw.shape),
+            'supp_img_bchw': supp_img_bchw,
+            'supp_mask_bhw': supp_mask_bhw
+        }
 
     def __len__(self):
         return len(self.dataset)

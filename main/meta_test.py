@@ -6,6 +6,7 @@ import classifier
 import loss
 
 import time
+import random
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
@@ -14,6 +15,8 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from tqdm import tqdm
+
+from IPython import embed
 
 def parse_args():
     parser = argparse.ArgumentParser(description = "Roger's Deep Learning Playground")
@@ -35,29 +38,37 @@ def masked_average_pooling(mask_b1hw, feature_bchw):
     if len(mask_b1hw.shape) == 3:
         mask_b1hw = mask_b1hw.view((mask_b1hw.shape[0], 1, mask_b1hw.shape[1], mask_b1hw.shape[2]))
 
+    # Assert remove mask is not in mask provided
+    assert -1 not in mask_b1hw
+
     # Spatial resolution mismatched. Interpolate feature to match mask size
     if mask_b1hw.shape[-2:] != feature_bchw.shape[-2:]:
         feature_bchw = F.interpolate(feature_bchw, size=mask_b1hw.shape[-2:], mode='bilinear')
     batch_pooled_vec = torch.sum(feature_bchw * mask_b1hw, dim = (2, 3)) / (mask_b1hw.sum(dim = (2, 3)) + 1e-5) # B x C
     return torch.mean(batch_pooled_vec, dim=0)
 
-def meta_test_one(cfg, backbone_net, criterion, feature_shape, device, support_img_tensor_bchw, support_mask_tensor_bhw,
-                            query_img_tensor_bchw, query_mask_tensor_bhw):
+def meta_test_one(cfg, backbone_net, criterion, feature_shape, device, meta_test_batch):
     post_processor = classifier.dispatcher(cfg, feature_shape)
     post_processor = post_processor.to(device)
 
-    num_shots = support_img_tensor_bchw.shape[0]
+    query_img_bchw_tensor = meta_test_batch['query_img_bchw'].cuda()
+    query_mask_bhw_tensor = meta_test_batch['query_mask_bhw'].cuda()
+    supp_img_bchw_tensor = meta_test_batch['supp_img_bchw'].cuda()
+    supp_mask_bhw_tensor = meta_test_batch['supp_mask_bhw'].cuda()
+
+    num_shots = supp_mask_bhw_tensor.shape[0]
 
     # Sanity check to make sure that there are at least some foreground pixels
-    for b in range(support_mask_tensor_bhw.shape[0]):
-        assert 1 in support_mask_tensor_bhw[b]
-    assert 1 in query_mask_tensor_bhw
+    for b in range(supp_mask_bhw_tensor.shape[0]):
+        assert 1 in supp_mask_bhw_tensor[b]
+    for b in range(query_mask_bhw_tensor.shape[0]):
+        assert 1 in query_mask_bhw_tensor[b]
 
     # Support set 1. Use masked average pooling to initialize class weight vector to bootstrap fine-tuning
     with torch.no_grad():
-        support_feature = backbone_net(support_img_tensor_bchw)
-        fg_vec = masked_average_pooling(support_mask_tensor_bhw, support_feature)  # 1 x C
-        bg_vec = masked_average_pooling(support_mask_tensor_bhw == 0, support_feature)  # 1 x C
+        support_feature = backbone_net(supp_img_bchw_tensor)
+        fg_vec = masked_average_pooling(supp_mask_bhw_tensor == 1, support_feature)  # 1 x C
+        bg_vec = masked_average_pooling(supp_mask_bhw_tensor == 0, support_feature)  # 1 x C
         fg_vec = fg_vec.reshape((1, -1, 1, 1)) # 1xCx1x1
         bg_vec = bg_vec.reshape((1, -1, 1, 1)) # 1xCx1x1
         bg_fg_class_mat = torch.cat([bg_vec, fg_vec], dim=0) #2xCx1x1
@@ -67,70 +78,22 @@ def meta_test_one(cfg, backbone_net, criterion, feature_shape, device, support_i
 
     # Query set. Evaluation
     with torch.no_grad():
-        query_feature = backbone_net(query_img_tensor_bchw)
-        eval_ori_spatial_res = query_img_tensor_bchw.shape[-2:]
+        query_feature = backbone_net(query_img_bchw_tensor)
+        eval_ori_spatial_res = query_img_bchw_tensor.shape[-2:]
         eval_predicted_mask = post_processor(query_feature, eval_ori_spatial_res)
         pred_map = eval_predicted_mask.max(dim = 1)[1]
 
         # TODO(roger): relax this to support multi-way
         # Following PANet, we use ignore_mask to mask confusing pixels from metric
-        predicted_fg = torch.logical_and(pred_map == 1, query_mask_tensor_bhw != -1)
-        predicted_bg = torch.logical_or(pred_map == 0, query_mask_tensor_bhw == -1)
-        tp_cnt = torch.logical_and(predicted_fg, query_mask_tensor_bhw == 1).sum()
-        fp_cnt = torch.logical_and(predicted_fg, query_mask_tensor_bhw != 1).sum()
-        fn_cnt = torch.logical_and(predicted_bg, query_mask_tensor_bhw == 1).sum()
-        tn_cnt = torch.logical_and(predicted_bg, query_mask_tensor_bhw != 1).sum()
+        predicted_fg = torch.logical_and(pred_map == 1, query_mask_bhw_tensor != -1)
+        predicted_bg = torch.logical_or(pred_map == 0, query_mask_bhw_tensor == -1)
+
+        tp_cnt = torch.logical_and(predicted_fg, query_mask_bhw_tensor == 1).sum()
+        fp_cnt = torch.logical_and(predicted_fg, query_mask_bhw_tensor != 1).sum()
+        fn_cnt = torch.logical_and(predicted_bg, query_mask_bhw_tensor == 1).sum()
+        tn_cnt = torch.logical_and(predicted_bg, query_mask_bhw_tensor != 1).sum()
     
     return tp_cnt, fp_cnt, fn_cnt, tn_cnt
-
-def construct_meta_test_task(meta_test_set, num_shots):
-    # Following PANet, we use five consistent random seeds.
-    # For each seed, 1000 (S, Q) pairs are sampled.
-    np.random.seed(1221)
-    seed_list = np.random.randint(0, 99999, size = (5, ))
-
-    # Generate indices list
-    # Struct:
-    #   - meta_test_task[0]: meta_test_single_run
-    #   - meta_test_task[0][0]: meta_test_batch_dict
-    #       - key: query_idx, support_idx_list, novel_class_id
-    meta_test_task = []
-
-    for seed in seed_list:
-        np.random.seed(seed)
-
-        # Query images are selected with replacement (support set may differ)
-        meta_test_single_run = []
-
-        query_image_list = np.random.randint(0, len(meta_test_set), size = (1000, ))
-        for query_img_idx in query_image_list:
-            # Get list of class in the image
-            class_list = meta_test_set.dataset.get_class_in_an_image(query_img_idx)
-
-            # Select a novel class in the list to be used
-            novel_class_idx = np.random.choice(class_list)
-
-            # Get support set
-            potential_support_img = meta_test_set.dataset.get_img_containing_class(novel_class_idx)
-
-            # Remove query image from the set
-            potential_support_img.remove(query_img_idx)
-            assert len(potential_support_img) >= num_shots
-            support_img_idx_list = np.random.choice(potential_support_img, size = (num_shots, ), replace = False)
-            
-            meta_test_batch_dict = {
-                "query_idx": query_img_idx,
-                "support_idx_list": support_img_idx_list,
-                "novel_class_id": novel_class_idx
-            }
-
-            meta_test_single_run.append(meta_test_batch_dict)
-        
-        # End of current seed.
-        meta_test_task.append(meta_test_single_run)
-    
-    return meta_test_task
-
 def meta_test(cfg, backbone_net, feature_shape, criterion, device, meta_test_set):
     backbone_net.eval()
 
@@ -140,36 +103,26 @@ def meta_test(cfg, backbone_net, feature_shape, criterion, device, meta_test_set
     num_shots = cfg.META_TEST.shot
     assert num_shots != -1
 
-    meta_test_task = construct_meta_test_task(meta_test_set, num_shots)
+    # Following PANet, we use five consistent random seeds.
+    # For each seed, 1000 (S, Q) pairs are sampled.
+    np.random.seed(1221)
+    seed_list = np.random.randint(0, 99999, size = (5, ))
 
+    meta_test_task = [[None for j in range(1000)] for i in range(5)]
     # Meta Test!
     iou_list = []
-    for i, meta_test_single_run in enumerate(meta_test_task):
-        for j, meta_test_batch in tqdm(enumerate(meta_test_single_run)):
-            novel_class_id = meta_test_batch['novel_class_id']
-            query_img, query_target = meta_test_set[meta_test_batch['query_idx']]
+    for i in range(len(meta_test_task)):
+        np.random.seed(seed_list[i])
+        random.seed(seed_list[i])
+        for j in tqdm(range(len(meta_test_task[i]))):
+            meta_test_batch = meta_test_set.episodic_sample(num_shots)
+            meta_test_task[i][j] = meta_test_batch
 
-            # TODO(roger): modify this to fit multi-way learning
-            query_target_mask = (query_target == novel_class_id).long()
+            if False:
+                plt.imshow((meta_test_batch['query_mask_bhw'][0] == 1).cpu().numpy())
+                plt.imshow((meta_test_batch['supp_mask_bhw'][0] == 1).cpu().numpy())
 
-            # Incoporate ignore_mask
-            query_target_mask[query_target == -1] = -1
-            support_img_list = []
-            support_mask_list = []
-            for supp_idx in meta_test_batch['support_idx_list']:
-                supp_img, supp_target = meta_test_set[supp_idx]
-                support_img_list.append(supp_img)
-                support_mask_list.append(supp_target == novel_class_id)
-
-            # Pad tensor
-            query_img_tensor_bchw = query_img.view((1, ) + query_img.shape)
-            query_mask_tensor_bhw = (query_target_mask.view((1, ) + query_target_mask.shape)).long()
-            support_img_tensor_bchw = torch.stack(support_img_list)
-            support_mask_tensor_bhw = torch.stack(support_mask_list).long()
-                
-            tp_cnt, fp_cnt, fn_cnt, tn_cnt = meta_test_one(cfg, backbone_net, criterion, feature_shape, device,
-                            support_img_tensor_bchw.cuda(), support_mask_tensor_bhw.cuda(),
-                            query_img_tensor_bchw.cuda(), query_mask_tensor_bhw.cuda())
+            tp_cnt, fp_cnt, fn_cnt, tn_cnt = meta_test_one(cfg, backbone_net, criterion, feature_shape, device, meta_test_batch)
             
             # Gather episode-wise statistics
             meta_test_task[i][j]['tp_pixel_cnt'] = tp_cnt
@@ -183,8 +136,8 @@ def meta_test(cfg, backbone_net, feature_shape, criterion, device, meta_test_set
         total_fp_cnt = np.zeros((5,), dtype = np.int)
         total_fn_cnt = np.zeros((5,), dtype = np.int)
         total_tn_cnt = np.zeros((5,), dtype = np.int)
-        for j, meta_test_batch in enumerate(meta_test_single_run):
-            novel_class_id = meta_test_task[i][j]['novel_class_id'] - 1 # from 1-indexed to 0-indexed
+        for j, meta_test_batch in enumerate(meta_test_task[i]):
+            novel_class_id = meta_test_task[i][j]['sampled_class_id'] - 1 # from 1-indexed to 0-indexed
             total_tp_cnt[novel_class_id] += meta_test_task[i][j]['tp_pixel_cnt']
             total_fp_cnt[novel_class_id] += meta_test_task[i][j]['fp_pixel_cnt']
             total_fn_cnt[novel_class_id] += meta_test_task[i][j]['fn_pixel_cnt']
