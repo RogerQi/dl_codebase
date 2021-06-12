@@ -72,6 +72,7 @@ _C.LOSS.loss_factor = 1.
 # Training Settings (used for both usual training and meta-trainint)
 #######################
 _C.TRAIN = CN()
+_C.TRAIN.train_time_eval = True
 _C.TRAIN.log_interval = 10
 _C.TRAIN.batch_size = 64
 _C.TRAIN.initial_lr = 0.01

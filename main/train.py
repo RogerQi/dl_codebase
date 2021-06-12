@@ -212,25 +212,26 @@ def main():
     for epoch in range(1, cfg.TRAIN.max_epochs + 1):
         start_cp = time.time()
         train(cfg, backbone_net, post_processor, criterion, device, train_loader, optimizer, epoch)
-        print("Training took {:.4f} seconds".format(time.time() - start_cp))
-        start_cp = time.time()
-        val_metric = test(cfg, backbone_net, post_processor, criterion, device, test_loader)
-        print("Eval took {:.4f} seconds.".format(time.time() - start_cp))
         scheduler.step()
-        if val_metric > best_val_metric:
-            print("Epoch {} New Best Model w/ metric: {:.4f}".format(epoch, val_metric))
-            best_val_metric = val_metric
-            if cfg.save_model:
-                best_model_path = "{0}_epoch{1}_{2:.4f}.pt".format(cfg.name, epoch, best_val_metric)
-                print("Saving model to {}".format(best_model_path))
-                torch.save(
-                    {
-                        "backbone": backbone_net.state_dict(),
-                        "head": post_processor.state_dict()
-                    },
-                    best_model_path
-                )
-        print("===================================\n")
+        print("Training took {:.4f} seconds".format(time.time() - start_cp))
+        if cfg.TRAIN.train_time_eval:
+            start_cp = time.time()
+            val_metric = test(cfg, backbone_net, post_processor, criterion, device, test_loader)
+            print("Eval took {:.4f} seconds.".format(time.time() - start_cp))
+            if val_metric > best_val_metric:
+                print("Epoch {} New Best Model w/ metric: {:.4f}".format(epoch, val_metric))
+                best_val_metric = val_metric
+                if cfg.save_model:
+                    best_model_path = "{0}_epoch{1}_{2:.4f}.pt".format(cfg.name, epoch, best_val_metric)
+                    print("Saving model to {}".format(best_model_path))
+                    torch.save(
+                        {
+                            "backbone": backbone_net.state_dict(),
+                            "head": post_processor.state_dict()
+                        },
+                        best_model_path
+                    )
+            print("===================================\n")
 
     if cfg.save_model:
         torch.save(
