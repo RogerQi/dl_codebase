@@ -46,6 +46,11 @@ def resize(transforms_cfg):
 # Color
 ######################
 
+@my_transforms_registry.register
+def color_jitter(transform_cfg):
+    op = transforms.ColorJitter(brightness=0.4, contrast=0.4, hue=0.4)
+    return op
+
 ######################
 # Geometric Transform
 ######################

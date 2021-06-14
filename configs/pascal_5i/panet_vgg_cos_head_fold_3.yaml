@@ -57,7 +57,7 @@ TRAIN:
   initial_lr: 1e-3
   lr_scheduler: "step_down"
   step_down_gamma: 0.1
-  step_down_on_epoch: [15, 19]
+  step_down_on_epoch: [15]
   log_interval: 20
   OPTIMIZER:
     type: "SGD"

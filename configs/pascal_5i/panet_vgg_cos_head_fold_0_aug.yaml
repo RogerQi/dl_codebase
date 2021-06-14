@@ -1,4 +1,4 @@
-name: 'pascal5i_semantic_segmentation_panet_vgg16_no_bn_metatrain_fold_1'
+name: 'pascal5i_panet_vgg_w_novel_examples_fold_0_aug'
 task: 'few_shot_semantic_segmentation_fine_tuning'
 input_dim: (3, 417, 417)
 meta_training_num_classes: 16 # (15 annotated class in splitted training set + 1 background)
@@ -30,12 +30,12 @@ LOSS:
 DATASET:
   dataset: 'pascal_5i'
   PASCAL5i:
-    folding: 1
+    folding: 0
   cache_all_data: True
   TRANSFORM:
     TRAIN:
       transforms: ('normalize', )
-      joint_transforms: ('joint_naive_resize', )
+      joint_transforms: ('joint_naive_resize', 'joint_random_horizontal_flip')
       TRANSFORMS_DETAILS:
         NORMALIZE:
           mean: (0.485, 0.456, 0.406)

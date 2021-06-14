@@ -45,6 +45,18 @@ def joint_random_crop(transforms_cfg):
     return crop
 
 @joint_transforms_registry.register
+def joint_random_resized_crop(transforms_cfg):
+    output_H, output_W = transforms_cfg.TRANSFORMS_DETAILS.crop_size
+    cropper = RandomResizedCrop((output_H, output_W))
+    def crop(img, target):
+        assert img.shape[-2:] == target.shape[-2:]
+        assert len(img.shape) == 3, "Only C x H x W images are supported"
+        i, j, h, w = cropper.get_params(img, cropper.scale, cropper.ratio)
+        img = tr_F.resized_crop(img, i, j, h, w, cropper.size, torchvision.transforms.InterpolationMode.BILINEAR)
+        target = tr_F.resized_crop(target, i, j, h, w, cropper.size, torchvision.transforms.InterpolationMode.NEAREST)
+    return crop
+
+@joint_transforms_registry.register
 def joint_naive_resize(transforms_cfg):
     output_H, output_W = transforms_cfg.TRANSFORMS_DETAILS.crop_size
     size = (output_H, output_W)
@@ -70,5 +82,16 @@ def joint_center_crop(transforms_cfg):
         assert img.shape[-2:] == target.shape[-2:]
         img = tr_F.center_crop(img, size)
         target = tr_F.center_crop(img, size)
+        return (img, target)
+    return crop
+
+@joint_transforms_registry.register
+def joint_random_horizontal_flip(transforms_cfg):
+    # The default setting is p=0.5 in torchvision
+    # https://pytorch.org/vision/stable/transforms.html#torchvision.transforms.RandomHorizontalFlip
+    def crop(img, target):
+        if torch.rand(1) < 0.5:
+            img = tr_F.hflip(img)
+            target = tr_F.hflip(target)
         return (img, target)
     return crop
