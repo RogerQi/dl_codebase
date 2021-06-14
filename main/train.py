@@ -25,6 +25,7 @@ def parse_args():
 def train(cfg, model, post_processor, criterion, device, train_loader, optimizer, epoch):
     model.train()
     post_processor.train()
+    start_cp = time.time()
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         feature = model(data)
@@ -42,16 +43,16 @@ def train(cfg, model, post_processor, criterion, device, train_loader, optimizer
                 pred = output.argmax(dim = 1, keepdim = True)
                 correct_prediction = pred.eq(target.view_as(pred)).sum().item()
                 batch_acc = correct_prediction / data.shape[0]
-                print('Train Epoch: {0} [{1}/{2} ({3:.0f}%)]\tLoss: {4:.6f}\tBatch Acc: {5:.6f}'.format(
+                print('Train Epoch: {0} [{1}/{2} ({3:.0f}%)]\tLoss: {4:.6f}\tBatch Acc: {5:.6f} Epoch Elapsed Time: {6:.1f}'.format(
                     epoch, batch_idx * len(data), len(train_loader.dataset),
-                    100. * batch_idx / len(train_loader), loss.item(), batch_acc))
+                    100. * batch_idx / len(train_loader), loss.item(), batch_acc, time.time() - start_cp))
         elif cfg.task == "semantic_segmentation" or cfg.task == "few_shot_semantic_segmentation_fine_tuning":
             if batch_idx % cfg.TRAIN.log_interval == 0:
                 pred_map = output.max(dim = 1)[1]
                 batch_acc, _ = utils.compute_pixel_acc(pred_map, target, fg_only=cfg.METRIC.SEGMENTATION.fg_only)
-                print('Train Epoch: {0} [{1}/{2} ({3:.0f}%)]\tLoss: {4:.6f}\tBatch Pixel Acc: {5:.6f}'.format(
+                print('Train Epoch: {0} [{1}/{2} ({3:.0f}%)]\tLoss: {4:.6f}\tBatch Pixel Acc: {5:.6f} Epoch Elapsed Time: {6:.1f}'.format(
                     epoch, batch_idx * len(data), len(train_loader.dataset),
-                    100. * batch_idx / len(train_loader), loss.item(), batch_acc))
+                    100. * batch_idx / len(train_loader), loss.item(), batch_acc, time.time() - start_cp))
         else:
             raise NotImplementedError
 
