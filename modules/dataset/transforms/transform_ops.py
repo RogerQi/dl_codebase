@@ -48,7 +48,7 @@ def resize(transforms_cfg):
 
 @my_transforms_registry.register
 def color_jitter(transform_cfg):
-    op = transforms.ColorJitter(brightness=0.4, contrast=0.4, hue=0.4)
+    op = transforms.ColorJitter(brightness=0.4, contrast=0.2, hue=0.2)
     return op
 
 ######################

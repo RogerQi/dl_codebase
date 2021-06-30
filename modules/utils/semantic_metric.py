@@ -77,3 +77,37 @@ def compute_iou(pred_map, label_map, num_classes, fg_only=True, ignore_mask=True
         return np.sum(area_intersection[1:]) / (np.sum(area_union[1:]) + 1e-10)
     else:
         return np.sum(area_intersection) / np.sum(area_union)
+
+def compute_iu(pred_map, label_map, num_classes, ignore_mask=True):
+    """
+    Param
+        - ignore_mask: set to True if there are targets to be ignored. Pixels whose value equal to 255
+            are excluded from benchmarking.
+    """
+    pred_map = np.asarray(pred_map).copy()
+    label_map = np.asarray(label_map).copy()
+
+    assert pred_map.shape == label_map.shape
+
+    if ignore_mask:
+        valid_idx = (label_map != -1)
+        pred_map = pred_map[valid_idx]
+        label_map = label_map[valid_idx]
+
+    # When computing intersection, all pixels that are not
+    # in the intersection are masked with zeros.
+    # So we add 1 to the existing mask so that background pixels can be computed
+    pred_map += 1
+    label_map += 1
+
+    # Compute area intersection:
+    intersection = pred_map * (pred_map == label_map)
+    (area_intersection, _) = np.histogram(
+        intersection, bins=num_classes, range=(1, num_classes))
+
+    # Compute area union:
+    (area_pred, _) = np.histogram(pred_map, bins=num_classes, range=(1, num_classes))
+    (area_lab, _) = np.histogram(label_map, bins=num_classes, range=(1, num_classes))
+    area_union = area_pred + area_lab - area_intersection
+
+    return (area_intersection[1:], area_union[1:])

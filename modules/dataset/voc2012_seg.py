@@ -129,6 +129,8 @@ class PascalVOCSegReader(datasets.vision.VisionDataset):
         - train: a bool flag to indicate whether L_{train} or L_{test} should be used
     """
 
+    CLASS_NAMES_LIST = ["background", "aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow", "diningtable", "dog", "horse", "motorbike", "person", "potted plant", "sheep", "sofa", "train", "tv/monitor"]
+
     def __init__(self, root, train, download=True):
         '''
         Params

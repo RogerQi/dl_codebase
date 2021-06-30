@@ -47,13 +47,17 @@ def joint_random_crop(transforms_cfg):
 @joint_transforms_registry.register
 def joint_random_resized_crop(transforms_cfg):
     output_H, output_W = transforms_cfg.TRANSFORMS_DETAILS.crop_size
-    cropper = RandomResizedCrop((output_H, output_W))
+    cropper = torchvision.transforms.RandomResizedCrop((output_H, output_W))
     def crop(img, target):
         assert img.shape[-2:] == target.shape[-2:]
         assert len(img.shape) == 3, "Only C x H x W images are supported"
+        if len(target.shape) == 2:
+            target = target.view((1,) + target.shape)
         i, j, h, w = cropper.get_params(img, cropper.scale, cropper.ratio)
         img = tr_F.resized_crop(img, i, j, h, w, cropper.size, torchvision.transforms.InterpolationMode.BILINEAR)
-        target = tr_F.resized_crop(target, i, j, h, w, cropper.size, torchvision.transforms.InterpolationMode.NEAREST)
+        target = tr_F.resized_crop(target, i, j, h, w, cropper.size, torchvision.transforms.InterpolationMode.NEAREST) # 1 x H x W
+        target = target.view(target.shape[1:])
+        return (img, target)
     return crop
 
 @joint_transforms_registry.register

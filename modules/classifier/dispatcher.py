@@ -6,14 +6,11 @@ class identity_mod(nn.Module):
     def forward(self, x):
         return x
 
-def dispatcher(cfg, feature_shape, meta_test = False):
+def dispatcher(cfg, feature_shape, num_classes = -1):
     classifier_name = cfg.CLASSIFIER.classifier
-    if cfg.task.startswith('few_shot'):
-        # For few-shot task, use a special parameter
-        if meta_test:
-            num_classes = cfg.meta_testing_num_classes
-        else:
-            num_classes = cfg.meta_training_num_classes
+    if num_classes != -1:
+        # Specified by user. Manually override.
+        num_classes = num_classes
     else:
         # Usual task
         num_classes = cfg.num_classes
