@@ -5,6 +5,99 @@ import torch.utils.model_zoo as model_zoo
 from torch.nn import functional as F
 from .backbone_base import backbone_base
 
+class BatchRenorm(torch.jit.ScriptModule):
+    def __init__(
+        self,
+        num_features: int,
+        eps: float = 1e-3,
+        momentum: float = 0.01,
+        affine: bool = True,
+    ):
+        super().__init__()
+        self.register_buffer(
+            "running_mean", torch.zeros(num_features, dtype=torch.float)
+        )
+        self.register_buffer(
+            "running_std", torch.ones(num_features, dtype=torch.float)
+        )
+        self.register_buffer(
+            "num_batches_tracked", torch.tensor(0, dtype=torch.long)
+        )
+        self.weight = torch.nn.Parameter(
+            torch.ones(num_features, dtype=torch.float)
+        )
+        self.bias = torch.nn.Parameter(
+            torch.zeros(num_features, dtype=torch.float)
+        )
+        self.affine = affine
+        self.eps = eps
+        self.step = 0
+        self.momentum = momentum
+
+    def _check_input_dim(self, x: torch.Tensor) -> None:
+        raise NotImplementedError()  # pragma: no cover
+
+    @property
+    def rmax(self) -> torch.Tensor:
+        return (2 / 35000 * self.num_batches_tracked + 25 / 35).clamp_(
+            1.0, 3.0
+        )
+
+    @property
+    def dmax(self) -> torch.Tensor:
+        return (5 / 20000 * self.num_batches_tracked - 25 / 20).clamp_(
+            0.0, 5.0
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        self._check_input_dim(x)
+        if x.dim() > 2:
+            x = x.transpose(1, -1)
+        if self.training:
+            dims = [i for i in range(x.dim() - 1)]
+            batch_mean = x.mean(dims)
+            batch_std = x.std(dims, unbiased=False) + self.eps
+            r = (
+                batch_std.detach() / self.running_std.view_as(batch_std)
+            ).clamp_(1 / self.rmax, self.rmax)
+            d = (
+                (batch_mean.detach() - self.running_mean.view_as(batch_mean))
+                / self.running_std.view_as(batch_std)
+            ).clamp_(-self.dmax, self.dmax)
+            x = (x - batch_mean) / batch_std * r + d
+            self.running_mean += self.momentum * (
+                batch_mean.detach() - self.running_mean
+            )
+            self.running_std += self.momentum * (
+                batch_std.detach() - self.running_std
+            )
+            self.num_batches_tracked += 1
+        else:
+            x = (x - self.running_mean) / self.running_std
+        if self.affine:
+            x = self.weight * x + self.bias
+        if x.dim() > 2:
+            x = x.transpose(1, -1)
+        return x
+
+
+class BatchRenorm1d(BatchRenorm):
+    def _check_input_dim(self, x: torch.Tensor) -> None:
+        if x.dim() not in [2, 3]:
+            raise ValueError("expected 2D or 3D input (got {x.dim()}D input)")
+
+
+class BatchRenorm2d(BatchRenorm):
+    def _check_input_dim(self, x: torch.Tensor) -> None:
+        if x.dim() != 4:
+            raise ValueError("expected 4D input (got {x.dim()}D input)")
+
+
+class BatchRenorm3d(BatchRenorm):
+    def _check_input_dim(self, x: torch.Tensor) -> None:
+        if x.dim() != 5:
+            raise ValueError("expected 5D input (got {x.dim()}D input)")
+
 class Conv2d(nn.Conv2d):
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
@@ -26,7 +119,7 @@ class Conv2d(nn.Conv2d):
 
 class ASPP(nn.Module):
 
-    def __init__(self, C, depth, conv=nn.Conv2d, norm=nn.BatchNorm2d, momentum=0.0003, mult=1):
+    def __init__(self, C, depth, conv=nn.Conv2d, norm=BatchRenorm2d, momentum=0.0003, mult=1):
         super(ASPP, self).__init__()
         self._C = C
         self._depth = depth
@@ -122,7 +215,7 @@ class ResNet(backbone_base):
 
     def __init__(self, cfg, block, layers, num_groups=None, weight_std=False, beta=False):
         self.inplanes = 64
-        self.norm = lambda planes, momentum=0.05: nn.BatchNorm2d(planes, momentum=momentum) if num_groups is None else nn.GroupNorm(num_groups, planes)
+        self.norm = lambda planes, momentum=0.05: BatchRenorm2d(planes, momentum=momentum)
         self.conv = Conv2d if weight_std else nn.Conv2d
 
         super(ResNet, self).__init__(cfg)
@@ -148,7 +241,7 @@ class ResNet(backbone_base):
             if isinstance(m, self.conv):
                 n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
                 m.weight.data.normal_(0, math.sqrt(2. / n))
-            elif isinstance(m, nn.BatchNorm2d) or isinstance(m, nn.GroupNorm):
+            elif isinstance(m, BatchRenorm2d):
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()
 
