@@ -28,7 +28,11 @@ def train(cfg, model, post_processor, criterion, device, train_loader, optimizer
     start_cp = time.time()
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
-        feature = model(data)
+        if cfg.TRAIN.freeze_backbone:
+            with torch.no_grad():
+                feature = model(data)
+        else:
+            feature = model(data)
         if cfg.task == "classification":
             output = post_processor(feature)
         elif cfg.task == "semantic_segmentation" or cfg.task == "few_shot_semantic_segmentation_fine_tuning":
@@ -180,21 +184,24 @@ def main():
             for i in range(26):
                 new_dict[new_keys[i]] = pretrained_weight_dict[keys[i]]
             
-            backbone_net.load_state_dict(new_dict)
+            backbone_net.load_state_dict(new_dict, strict=True)
         else:
             backbone_net.load_state_dict(pretrained_weight_dict, strict=False)
 
 
     criterion = loss.dispatcher(cfg)
 
-    trainable_params = list(backbone_net.parameters()) + list(post_processor.parameters())
+    if cfg.TRAIN.freeze_backbone:
+        trainable_params = list(post_processor.parameters())
+    else:
+        trainable_params = list(backbone_net.parameters()) + list(post_processor.parameters())
 
     if cfg.TRAIN.OPTIMIZER.type == "adadelta":
         optimizer = optim.Adadelta(trainable_params, lr = cfg.TRAIN.initial_lr,
                                     weight_decay = cfg.TRAIN.OPTIMIZER.weight_decay)
     elif cfg.TRAIN.OPTIMIZER.type == "SGD":
         optimizer = optim.SGD(trainable_params, lr = cfg.TRAIN.initial_lr, momentum = cfg.TRAIN.OPTIMIZER.momentum,
-                                weight_decay = cfg.TRAIN.OPTIMIZER.weight_decay, nesterov = True)
+                                weight_decay = cfg.TRAIN.OPTIMIZER.weight_decay)
     elif cfg.TRAIN.OPTIMIZER.type == "ADAM":
         optimizer = optim.Adam(trainable_params, lr = cfg.TRAIN.initial_lr, betas = (0.9, 0.999),
                                 weight_decay = cfg.TRAIN.OPTIMIZER.weight_decay)
@@ -205,6 +212,12 @@ def main():
     if cfg.TRAIN.lr_scheduler == "step_down":
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones = cfg.TRAIN.step_down_on_epoch,
                                                             gamma = cfg.TRAIN.step_down_gamma)
+    elif cfg.TRAIN.lr_scheduler == "polynomial":
+        max_epoch = cfg.TRAIN.max_epochs
+        def polynomial_schedule(epoch):
+            # from https://arxiv.org/pdf/2012.01415.pdf
+            return (1 - epoch / max_epoch)**0.9
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, polynomial_schedule)
     else:
         raise NotImplementedError("Got unsupported scheduler: {}".format(cfg.TRAIN.lr_scheduler))
 
@@ -215,24 +228,23 @@ def main():
         train(cfg, backbone_net, post_processor, criterion, device, train_loader, optimizer, epoch)
         scheduler.step()
         print("Training took {:.4f} seconds".format(time.time() - start_cp))
-        if cfg.TRAIN.train_time_eval:
-            start_cp = time.time()
-            val_metric = test(cfg, backbone_net, post_processor, criterion, device, test_loader)
-            print("Eval took {:.4f} seconds.".format(time.time() - start_cp))
-            if val_metric > best_val_metric:
-                print("Epoch {} New Best Model w/ metric: {:.4f}".format(epoch, val_metric))
-                best_val_metric = val_metric
-                if cfg.save_model:
-                    best_model_path = "{0}_epoch{1}_{2:.4f}.pt".format(cfg.name, epoch, best_val_metric)
-                    print("Saving model to {}".format(best_model_path))
-                    torch.save(
-                        {
-                            "backbone": backbone_net.state_dict(),
-                            "head": post_processor.state_dict()
-                        },
-                        best_model_path
-                    )
-            print("===================================\n")
+        start_cp = time.time()
+        val_metric = test(cfg, backbone_net, post_processor, criterion, device, test_loader)
+        print("Eval took {:.4f} seconds.".format(time.time() - start_cp))
+        if val_metric > best_val_metric:
+            print("Epoch {} New Best Model w/ metric: {:.4f}".format(epoch, val_metric))
+            best_val_metric = val_metric
+            if cfg.save_model:
+                best_model_path = "{0}_epoch{1}_{2:.4f}.pt".format(cfg.name, epoch, best_val_metric)
+                print("Saving model to {}".format(best_model_path))
+                torch.save(
+                    {
+                        "backbone": backbone_net.state_dict(),
+                        "head": post_processor.state_dict()
+                    },
+                    best_model_path
+                )
+        print("===================================\n")
 
     if cfg.save_model:
         torch.save(

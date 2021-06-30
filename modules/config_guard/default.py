@@ -72,7 +72,6 @@ _C.LOSS.loss_factor = 1.
 # Training Settings (used for both usual training and meta-trainint)
 #######################
 _C.TRAIN = CN()
-_C.TRAIN.train_time_eval = True
 _C.TRAIN.log_interval = 10
 _C.TRAIN.batch_size = 64
 _C.TRAIN.initial_lr = 0.01
@@ -80,6 +79,7 @@ _C.TRAIN.lr_scheduler = 'none'
 _C.TRAIN.step_down_gamma = 0.1
 _C.TRAIN.step_down_on_epoch = []
 _C.TRAIN.max_epochs = 100
+_C.TRAIN.freeze_backbone = False
 _C.TRAIN.OPTIMIZER = CN()
 _C.TRAIN.OPTIMIZER.type = 'SGD'
 _C.TRAIN.OPTIMIZER.momentum = 0.9
