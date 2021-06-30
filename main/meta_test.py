@@ -27,7 +27,7 @@ def parse_args():
 
     return args
 
-def masked_average_pooling(mask_b1hw, feature_bchw):
+def masked_average_pooling(mask_b1hw, feature_bchw, normalization=False):
     '''
     Params
         - mask_b1hw: a binary mask whose element-wise value is either 0 or 1
@@ -44,11 +44,16 @@ def masked_average_pooling(mask_b1hw, feature_bchw):
     # Spatial resolution mismatched. Interpolate feature to match mask size
     if mask_b1hw.shape[-2:] != feature_bchw.shape[-2:]:
         feature_bchw = F.interpolate(feature_bchw, size=mask_b1hw.shape[-2:], mode='bilinear')
+    
+    if normalization:
+        feature_norm = torch.norm(feature_bchw, p=2, dim=1).unsqueeze(1).expand_as(feature_bchw)
+        feature_bchw = feature_bchw.div(feature_norm + 1e-5) # avoid div by zero
+
     batch_pooled_vec = torch.sum(feature_bchw * mask_b1hw, dim = (2, 3)) / (mask_b1hw.sum(dim = (2, 3)) + 1e-5) # B x C
     return torch.mean(batch_pooled_vec, dim=0)
 
 def meta_test_one(cfg, backbone_net, criterion, feature_shape, device, meta_test_batch):
-    post_processor = classifier.dispatcher(cfg, feature_shape)
+    post_processor = classifier.dispatcher(cfg, feature_shape, 2)
     post_processor = post_processor.to(device)
 
     query_img_bchw_tensor = meta_test_batch['query_img_bchw'].cuda()
@@ -67,8 +72,8 @@ def meta_test_one(cfg, backbone_net, criterion, feature_shape, device, meta_test
     # Support set 1. Use masked average pooling to initialize class weight vector to bootstrap fine-tuning
     with torch.no_grad():
         support_feature = backbone_net(supp_img_bchw_tensor)
-        fg_vec = masked_average_pooling(supp_mask_bhw_tensor == 1, support_feature)  # 1 x C
-        bg_vec = masked_average_pooling(supp_mask_bhw_tensor == 0, support_feature)  # 1 x C
+        fg_vec = masked_average_pooling(supp_mask_bhw_tensor == 1, support_feature, True)  # 1 x C
+        bg_vec = masked_average_pooling(supp_mask_bhw_tensor == 0, support_feature, True)  # 1 x C
         fg_vec = fg_vec.reshape((1, -1, 1, 1)) # 1xCx1x1
         bg_vec = bg_vec.reshape((1, -1, 1, 1)) # 1xCx1x1
         bg_fg_class_mat = torch.cat([bg_vec, fg_vec], dim=0) #2xCx1x1
