@@ -6,68 +6,59 @@ import torch
 import torchvision
 from torchvision import datasets, transforms
 from PIL import Image
+from pycocotools.coco import COCO
 from .baseset import base_set
 
 # 2017 train images normalization constants
 #   mean: 0.4700, 0.4468, 0.4076
 #   sd: 0.2439, 0.2390, 0.2420
 
-class CocoSemantic(datasets.vision.VisionDataset):
-    '''
-    Semantic segmentation of COCO2017 data generated from COCO 2017 Panoptic Annotation.
+class COCOSeg(datasets.vision.VisionDataset):
+    def __init__(self, root, train=True):
+        super(COCOSeg, self).__init__(root, None, None, None)
+        self.min_area = 0 # 200
+        split_name = "train" if train else "val"
+        self.annotation_path = os.path.join(root, 'annotations', 'instances_{}2017.json'.format(split_name))
+        self.img_dir = os.path.join(root, '{}2017'.format(split_name))
+        self.coco = COCO(self.annotation_path)
+        self.img_ids = list(self.coco.imgs.keys())
 
-    Should you wish to use this, please refer to main/utils/coco_panoptic_2_seg.py to pre-process data.
-    '''
-    def __init__(self, root, annFile, semantic_seg_folder, transform=None, target_transform=None, transforms=None):
-        super(CocoSemantic, self).__init__(root, transforms, transform, target_transform)
-        with open(annFile, 'r') as f:
-            self.coco_p = json.load(f)
-        assert len(self.coco_p['annotations']) == len(self.coco_p['images'])
-        self.dataset_size = len(self.coco_p['annotations'])
-        self.semantic_seg_folder = semantic_seg_folder
+        # COCO class
+        class_list = sorted([i for i in self.coco.cats.keys()])
+        self.class_map = {}
+        for i in range(len(class_list)):
+            self.class_map[class_list[i]] = i + 1
+        self.to_tensor_func = torchvision.transforms.ToTensor()
 
-    def __getitem__(self, index):
-        """
-        Args:
-            index (int): Index
-
-        Returns:
-            tuple: Tuple (image, target), where target is a tensor of shape (H, W) and type torch.uint64.
-                Each element is ranged between (0, num_classes - 1).
-        """
-        # Get image name and paths
-        annotation = self.coco_p['annotations'][index]
-        img_name = annotation['file_name']
-        # Get raw image
-        raw_img_name = img_name[:-3] + 'jpg'
-        img_path = os.path.join(self.root, raw_img_name)
-        img = np.array(Image.open(img_path).convert('RGB'), dtype = np.uint8) # Some images in COCO are gray-scale.
-        # Get annotation
-        seg_img_path = os.path.join(self.semantic_seg_folder, img_name)
-        target = torch.tensor(np.array(Image.open(seg_img_path), dtype=np.int64))
-
-        if self.transforms is not None:
-            img, target = self.transforms(img, target)
-
-        return img, target
+    def _get_img(self, img_id):
+        img_desc = self.coco.imgs[img_id]
+        img_fname = img_desc['file_name']
+        img_fpath = os.path.join(self.img_dir, img_fname)
+        return Image.open(img_fpath).convert('RGB')
+    
+    def __getitem__(self, idx: int):
+        img_id = self.img_ids[idx]
+        annotations = self.coco.imgToAnns[img_id]
+        img = self._get_img(img_id)
+        seg_mask = torch.zeros((img.size[1], img.size[0]), dtype=torch.int64)
+        for ann in annotations:
+            real_class_id = self.class_map[ann['category_id']]
+            ann_mask = torch.from_numpy(self.coco.annToMask(ann))
+            # mask indicating invalid regions
+            if ann['iscrowd'] or ann['area'] < self.min_area:
+                seg_mask[ann_mask > 0] = -1
+            else:
+                assert real_class_id >= 0 and real_class_id <= 80
+                seg_mask = torch.max(seg_mask, ann_mask * real_class_id)
+        return (self.to_tensor_func(img), seg_mask.long())
 
     def __len__(self):
-        return self.dataset_size
+        return len(self.coco.imgs)
 
 def get_train_set(cfg):
-    ds = CocoSemantic(
-        "/data/COCO2017/train2017/",
-        "/data/COCO2017/annotations/panoptic_train2017.json",
-        "/data/COCO2017/annotations/panoptic_semantic_train2017/",
-        transform = transforms.ToTensor()
-    )
+    ds = COCOSeg("/data/COCO2017/", True)
     return base_set(ds, "train", cfg)
 
 def get_val_set(cfg):
-    ds = CocoSemantic(
-        "/data/COCO2017/val2017/",
-        "/data/COCO2017/annotations/panoptic_val2017.json",
-        "/data/COCO2017/annotations/panoptic_semantic_val2017/",
-        transform = transforms.ToTensor()
-    )
+    ds = COCOSeg("/data/COCO2017", False)
     return base_set(ds, "test", cfg)

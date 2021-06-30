@@ -15,14 +15,15 @@ from .voc2012_seg import PascalVOCSegReader
 from IPython import embed
 
 class Pascal5iReader(torchvision.datasets.vision.VisionDataset):
-    def __init__(self, root, fold, train, exclude_novel=False):
+    def __init__(self, root, fold, base_stage, split, exclude_novel=False):
         """
         pascal_5i dataset reader
 
         Parameters:
             - root:  root to data folder containing SBD and VOC2012 dataset. See README.md for details
             - fold:  folding index as in OSLSM (https://arxiv.org/pdf/1709.03410.pdf)
-            - train: a bool flag to indicate whether L_{train} or L_{test} should be used
+            - base_stage: a bool flag to indicate whether L_{train} or L_{test} should be used
+            - split: Specify train/val split of VOC2012 dataset to read from. True indicates training
             - exclude_novel: boolean flag to indicate whether novel examples are removed or masked.
                 There are two cases:
                     * If set to True, examples containing pixels of novel classes are excluded.
@@ -34,10 +35,10 @@ class Pascal5iReader(torchvision.datasets.vision.VisionDataset):
         """
         super(Pascal5iReader, self).__init__(root, None, None, None)
         assert fold >= 0 and fold <= 3
-        self.train = train
+        self.base_stage = base_stage
 
         # Get augmented VOC dataset
-        self.vanilla_ds = PascalVOCSegReader(root, self.train, download=True)
+        self.vanilla_ds = PascalVOCSegReader(root, split, download=True)
 
         # Split dataset based on folding. Refer to https://arxiv.org/pdf/1709.03410.pdf
         # Given fold number, define L_{test}
@@ -45,7 +46,7 @@ class Pascal5iReader(torchvision.datasets.vision.VisionDataset):
         self.train_label_set = [i for i in range(
             1, 21) if i not in self.val_label_set]
         
-        if self.train:
+        if self.base_stage:
             self.visible_labels = self.train_label_set
             self.invisible_labels = self.val_label_set
         else:
@@ -53,7 +54,7 @@ class Pascal5iReader(torchvision.datasets.vision.VisionDataset):
             self.invisible_labels = self.train_label_set
         
         # Pre-training or meta-training
-        if exclude_novel and self.train:
+        if exclude_novel and self.base_stage:
             # Exclude images containing invisible classes and use rest
             novel_examples_list = []
             for label in self.invisible_labels:
@@ -111,33 +112,52 @@ class Pascal5iReader(torchvision.datasets.vision.VisionDataset):
         Return:
             - Offseted and masked segmentation mask
         """
-        min_vis_label = min(self.visible_labels)
-        max_vis_label = max(self.visible_labels)
-        lesser_pixel_idx = (target_tensor < min_vis_label)
-        greater_pixel_idx = (target_tensor > max_vis_label)
-        ignore_pixel_idx = (target_tensor == -1)
-        target_tensor = target_tensor - (min_vis_label - 1) # min_vis_label => 1 after this step
-        target_tensor[lesser_pixel_idx] = 0
-        target_tensor[greater_pixel_idx] = 0
-        target_tensor[ignore_pixel_idx] = -1
+        # Use the property that validation label split is contiguous to accelerate
+        min_val_label = min(self.val_label_set)
+        max_val_label = max(self.val_label_set)
+        if self.base_stage:
+            greater_pixel_idx = (target_tensor > max_val_label)
+            novel_pixel_idx = torch.logical_and(target_tensor >= min_val_label, torch.logical_not(greater_pixel_idx))
+            target_tensor[novel_pixel_idx] = 0
+            target_tensor[greater_pixel_idx] -= len(self.val_label_set)
+        else:
+            lesser_pixel_idx = (target_tensor < min_val_label)
+            greater_pixel_idx = (target_tensor > max_val_label)
+            ignore_pixel_idx = (target_tensor == -1)
+            target_tensor = target_tensor - (min_val_label - 1) # min_vis_label => 1 after this step
+            target_tensor[lesser_pixel_idx] = 0
+            target_tensor[greater_pixel_idx] = 0
+            target_tensor[ignore_pixel_idx] = -1
         return target_tensor
 
 def get_train_set(cfg):
     folding = cfg.DATASET.PASCAL5i.folding
-    ds = Pascal5iReader('/data', folding, True, exclude_novel=True)
+    ds = Pascal5iReader('/data', folding, True, True, exclude_novel=True)
     return base_set(ds, "train", cfg)
 
 def get_val_set(cfg):
     folding = cfg.DATASET.PASCAL5i.folding
-    ds = Pascal5iReader('/data', folding, False, exclude_novel=False)
+    ds = Pascal5iReader('/data', folding, True, False, exclude_novel=False)
     return base_set(ds, "test", cfg)
 
 def get_meta_train_set(cfg):
     folding = cfg.DATASET.PASCAL5i.folding
-    ds = Pascal5iReader('/data', folding, True, exclude_novel=False)
+    ds = Pascal5iReader('/data', folding, False, True, exclude_novel=False)
     return base_set(ds, "train", cfg)
 
 def get_meta_test_set(cfg):
     folding = cfg.DATASET.PASCAL5i.folding
-    ds = Pascal5iReader('/data', folding, False, exclude_novel=False)
+    ds = Pascal5iReader('/data', folding, False, False, exclude_novel=False)
+    return base_set(ds, "test", cfg)
+
+def get_continual_vanilla_train_set(cfg):
+    ds = PascalVOCSegReader('/data', True, download=True)
+    return base_set(ds, "test", cfg) # Use test config to keep original scale of the image.
+
+def get_continual_aug_train_set(cfg):
+    ds = PascalVOCSegReader('/data', True, download=True)
+    return base_set(ds, "train", cfg)
+
+def get_continual_test_set(cfg):
+    ds = PascalVOCSegReader('/data', False, download=True)
     return base_set(ds, "test", cfg)
