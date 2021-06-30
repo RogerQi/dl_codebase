@@ -25,13 +25,14 @@ def parse_args():
 
     return args
 
-def test(cfg, model, post_processor, criterion, device, test_loader, visfreq):
+def test(cfg, model, post_processor, criterion, device, test_loader, visfreq, class_names_list):
     model.eval()
     post_processor.eval()
     test_loss = 0
     correct = 0
     pixel_acc_list = []
     iou_list = []
+    class_intersection, class_union = (None, None)
     with torch.no_grad():
         for idx, (data, target) in enumerate(test_loader):
             data, target = data.to(device), target.to(device)
@@ -58,12 +59,22 @@ def test(cfg, model, post_processor, criterion, device, test_loader, visfreq):
                     target_np = np.array(target[i].cpu(), dtype=np.int64)
                     if cfg.task == "semantic_segmentation":
                         iou = utils.compute_iou(pred_np, target_np, cfg.num_classes, fg_only=cfg.METRIC.SEGMENTATION.fg_only)
+                        intersection, union = utils.compute_iu(pred_np, target_np, cfg.num_classes)
                     else:
                         iou = utils.compute_iou(pred_np, target_np, cfg.meta_training_num_classes, fg_only=cfg.METRIC.SEGMENTATION.fg_only)
+                        intersection, union = utils.compute_iu(pred_np, target_np, cfg.meta_training_num_classes)
                     iou_list.append(float(iou))
+                    if class_intersection is None:
+                        class_intersection = intersection
+                        class_union = union
+                    else:
+                        class_intersection += intersection
+                        class_union += union
                     if (idx + 1) % visfreq == 0:
-                        cv2.imwrite("{}_{}_pred.png".format(idx, i), pred_np)
-                        cv2.imwrite("{}_{}_label.png".format(idx, i), target_np)
+                        gt_label = utils.visualize_segmentation(cfg, data[i], target_np, class_names_list)
+                        predicted_label = utils.visualize_segmentation(cfg, data[i], pred_np, class_names_list)
+                        cv2.imwrite("{}_{}_pred.png".format(idx, i), predicted_label)
+                        cv2.imwrite("{}_{}_label.png".format(idx, i), gt_label)
                         # Visualize RGB image as well
                         ori_rgb_np = np.array(data[i].permute((1, 2, 0)).cpu())
                         if 'normalize' in cfg.DATASET.TRANSFORM.TEST.transforms:
@@ -86,8 +97,11 @@ def test(cfg, model, post_processor, criterion, device, test_loader, visfreq):
             test_loss, correct, len(test_loader.dataset),
             100. * correct / len(test_loader.dataset)))
     elif cfg.task == "semantic_segmentation" or cfg.task == "few_shot_semantic_segmentation_fine_tuning":
-        print('\nTest set: Average loss: {:.4f}, Mean Pixel Accuracy: {:.4f}, Mean IoU {:.4f}\n'.format(
-            test_loss, np.mean(pixel_acc_list), np.mean(iou_list)))
+        class_iou = class_intersection / (class_union + 1e-10)
+        print("Classwise IoU:")
+        print(class_iou)
+        print('\nTest set: Average loss: {:.4f}, Mean Pixel Accuracy: {:.4f}, Mean IoU {:.4f} Pixel mIoU {:.4f}\n'.format(
+            test_loss, np.mean(pixel_acc_list), np.mean(iou_list), np.mean(class_iou)))
     else:
         raise NotImplementedError
 
@@ -140,7 +154,8 @@ def main():
 
     criterion = loss.dispatcher(cfg)
 
-    test(cfg, backbone_net, post_processor, criterion, device, test_loader, args.visfreq)
+    class_names_list = test_set.dataset.CLASS_NAMES_LIST
+    test(cfg, backbone_net, post_processor, criterion, device, test_loader, args.visfreq, class_names_list)
 
 
 if __name__ == '__main__':
