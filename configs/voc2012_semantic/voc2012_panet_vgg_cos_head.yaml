@@ -1,6 +1,6 @@
 name: 'voc2012_semantic_segmentation_panet_vgg16'
 task: 'semantic_segmentation'
-input_dim: (3, 513, 513) # Input dim follows https://github.com/chenxi116/DeepLabv3.pytorch
+input_dim: (3, 480, 480) # Input dim follows https://github.com/chenxi116/DeepLabv3.pytorch
 num_classes: 21 # (20 annotated class + 1 background)
 save_model: True
 
@@ -28,12 +28,12 @@ DATASET:
   TRANSFORM:
     TRAIN:
       transforms: ('normalize', )
-      joint_transforms: ('joint_naive_resize', )
+      joint_transforms: ('joint_naive_resize',)
       TRANSFORMS_DETAILS:
         NORMALIZE:
           mean: (0.4700, 0.4468, 0.4076)
           sd: (0.2439, 0.2390, 0.2420)
-        crop_size: (513, 513)
+        crop_size: (480, 480)
     TEST:
       transforms: ('normalize', )
       joint_transforms: ('joint_naive_resize', )
@@ -41,10 +41,10 @@ DATASET:
         NORMALIZE:
           mean: (0.4700, 0.4468, 0.4076)
           sd: (0.2439, 0.2390, 0.2420)
-        crop_size: (513, 513)
+        crop_size: (480, 480)
 
 TRAIN:
-  max_epochs: 25
+  max_epochs: 30
   batch_size: 16
   initial_lr: 1e-3
   lr_scheduler: "step_down"

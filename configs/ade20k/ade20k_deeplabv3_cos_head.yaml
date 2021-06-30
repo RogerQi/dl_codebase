@@ -1,7 +1,7 @@
-name: 'voc2012_semantic_segmentation_deeplabv3_resnet101'
+name: 'ade20k_semantic_segmentation_deeplabv3_resnet101_cos'
 task: 'semantic_segmentation'
-input_dim: (3, 513, 513) # Input dim follows https://github.com/chenxi116/DeepLabv3.pytorch
-num_classes: 21 # (20 annotated class + 1 background)
+input_dim: (3, 512, 512) # Input dim follows https://github.com/chenxi116/DeepLabv3.pytorch
+num_classes: 151 # (150 annotated class + 1 background)
 save_model: True
 
 SYSTEM:
@@ -15,16 +15,20 @@ BACKBONE:
   pretrained_path: "/data/pretrained_model/resnet101-5d3b4d8f.pth"
 
 CLASSIFIER:
-  classifier: "plain_c1"
+  # classifier: "plain_c1"
+  classifier: "seg_cos"
   SEGHEAD:
     use_bilinear_interpolation: True
+    COSINE:
+      weight_norm: False
+      train_scale_factor: 20
+      val_scale_factor: 3
 
 LOSS:
   loss: 'semantic_nllloss'
 
 DATASET:
-  dataset: 'VOC2012_seg'
-  cache_all_data: True
+  dataset: 'ade20k'
   TRANSFORM:
     TRAIN:
       transforms: ('normalize', )
@@ -33,21 +37,23 @@ DATASET:
         NORMALIZE:
           mean: (0.4700, 0.4468, 0.4076)
           sd: (0.2439, 0.2390, 0.2420)
-        crop_size: (513, 513)
+        crop_size: (512, 512)
     TEST:
       transforms: ('normalize', )
-      joint_transforms: ('joint_random_resized_crop', 'joint_random_horizontal_flip')
+      joint_transforms: ('joint_naive_resize', )
       TRANSFORMS_DETAILS:
         NORMALIZE:
           mean: (0.4700, 0.4468, 0.4076)
           sd: (0.2439, 0.2390, 0.2420)
-        crop_size: (513, 513)
+        crop_size: (512, 512)
 
 TRAIN:
   max_epochs: 50
-  batch_size: 16
+  batch_size: 12
   initial_lr: 0.007
-  lr_scheduler: "polynomial"
+  lr_scheduler: "step_down"
+  step_down_gamma: 0.1
+  step_down_on_epoch: [999]
   log_interval: 20
   OPTIMIZER:
     type: "SGD"

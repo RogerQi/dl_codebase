@@ -52,7 +52,6 @@ DATASET:
         crop_size: (417, 417)
 
 TRAIN:
-  train_time_eval: False
   max_epochs: 130
   batch_size: 8
   initial_lr: 5e-4

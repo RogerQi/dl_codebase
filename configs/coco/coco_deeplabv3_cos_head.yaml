@@ -1,7 +1,7 @@
-name: 'voc2012_semantic_segmentation_deeplabv3_resnet101'
+name: 'coco_semantic_segmentation_deeplabv3_resnet101_cos'
 task: 'semantic_segmentation'
 input_dim: (3, 513, 513) # Input dim follows https://github.com/chenxi116/DeepLabv3.pytorch
-num_classes: 21 # (20 annotated class + 1 background)
+num_classes: 81 # (80 annotated class + 1 background)
 save_model: True
 
 SYSTEM:
@@ -15,15 +15,20 @@ BACKBONE:
   pretrained_path: "/data/pretrained_model/resnet101-5d3b4d8f.pth"
 
 CLASSIFIER:
-  classifier: "plain_c1"
+  # classifier: "plain_c1"
+  classifier: "seg_cos"
   SEGHEAD:
     use_bilinear_interpolation: True
+    COSINE:
+      weight_norm: False
+      train_scale_factor: 10
+      val_scale_factor: 3
 
 LOSS:
   loss: 'semantic_nllloss'
 
 DATASET:
-  dataset: 'VOC2012_seg'
+  dataset: 'coco2017'
   cache_all_data: True
   TRANSFORM:
     TRAIN:
@@ -36,7 +41,7 @@ DATASET:
         crop_size: (513, 513)
     TEST:
       transforms: ('normalize', )
-      joint_transforms: ('joint_random_resized_crop', 'joint_random_horizontal_flip')
+      joint_transforms: ('joint_naive_resize', )
       TRANSFORMS_DETAILS:
         NORMALIZE:
           mean: (0.4700, 0.4468, 0.4076)
@@ -44,10 +49,12 @@ DATASET:
         crop_size: (513, 513)
 
 TRAIN:
-  max_epochs: 50
+  max_epochs: 20
   batch_size: 16
-  initial_lr: 0.007
+  initial_lr: 0.01
   lr_scheduler: "polynomial"
+  step_down_gamma: 0.1
+  step_down_on_epoch: [999]
   log_interval: 20
   OPTIMIZER:
     type: "SGD"
