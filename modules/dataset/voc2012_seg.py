@@ -173,8 +173,6 @@ class PascalVOCSegReader(datasets.vision.VisionDataset):
             # Map name to indices
             class_idx_list = [name_list.index(n) for n in class_name_list]
             self.class_map[c] = class_idx_list
-        
-        self.to_tensor_func = torchvision.transforms.ToTensor()
 
     def __len__(self):
         return len(self.images)
@@ -195,7 +193,6 @@ class PascalVOCSegReader(datasets.vision.VisionDataset):
     def __getitem__(self, idx):
         # For both SBD and VOC2012, images are stored as .jpg
         img = Image.open(self.images[idx]).convert("RGB")
-        img = self.to_tensor_func(img)
 
         target_np = np.load(self.targets[idx])
 

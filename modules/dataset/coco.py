@@ -28,7 +28,6 @@ class COCOSeg(datasets.vision.VisionDataset):
         self.class_map = {}
         for i in range(len(class_list)):
             self.class_map[class_list[i]] = i + 1
-        self.to_tensor_func = torchvision.transforms.ToTensor()
 
     def _get_img(self, img_id):
         img_desc = self.coco.imgs[img_id]
@@ -50,7 +49,7 @@ class COCOSeg(datasets.vision.VisionDataset):
             else:
                 assert real_class_id >= 0 and real_class_id <= 80
                 seg_mask = torch.max(seg_mask, ann_mask * real_class_id)
-        return (self.to_tensor_func(img), seg_mask.long())
+        return (img, seg_mask.long())
 
     def __len__(self):
         return len(self.coco.imgs)

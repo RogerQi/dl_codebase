@@ -22,8 +22,6 @@ class ScanNet25K(datasets.vision.VisionDataset):
         self.img_paths = []
         self.target_paths = []
 
-        self.to_tensor_func = torchvision.transforms.ToTensor()
-
         for scene_name in scene_list:
             color_dir = os.path.join(root, scene_name, "color")
             label_dir = os.path.join(root, scene_name, "label")
@@ -54,7 +52,6 @@ class ScanNet25K(datasets.vision.VisionDataset):
         """
         # Get image name and paths
         img = Image.open(self.img_paths[idx]).convert("RGB")
-        img = self.to_tensor_func(img)
 
         target = Image.open(self.target_paths[idx])
         target_np = np.array(target, dtype=np.long)

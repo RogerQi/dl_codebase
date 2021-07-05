@@ -93,11 +93,11 @@ class base_set(torch.utils.data.Dataset):
         try:
             normalize_first_occurence = transforms_list.index("normalize")
             assert normalize_first_occurence == len(transforms_list) - 1, "normalization happens last"
-            return transforms.Compose([transforms.ToPILImage()] + transform_ops_list + [transforms.ToTensor(),
+            return transforms.Compose(transform_ops_list + [transforms.ToTensor(),
                         self._get_dataset_normalizer(transforms_cfg)])
         except ValueError:
             # Given transforms does not contain normalization
-            return transforms.Compose([transforms.ToPILImage()] + transform_ops_list + [transforms.ToTensor()])
+            return transforms.Compose(transform_ops_list + [transforms.ToTensor()])
     
     def _get_joint_transforms(self, transforms_cfg, transforms_ops_list):
         if len(transforms_ops_list) == 0:
@@ -112,5 +112,5 @@ class base_set(torch.utils.data.Dataset):
         return composed_func
 
     def _get_dataset_normalizer(self, transforms_cfg):
-        return transforms.Normalize(transforms_cfg.TRANSFORMS_DETAILS.NORMALIZE.mean,
-                                    transforms_cfg.TRANSFORMS_DETAILS.NORMALIZE.sd)
+        return transforms.Normalize(mean=transforms_cfg.TRANSFORMS_DETAILS.NORMALIZE.mean,
+                                    std=transforms_cfg.TRANSFORMS_DETAILS.NORMALIZE.sd)
