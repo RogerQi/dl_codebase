@@ -1,3 +1,4 @@
+import math
 import torch
 from torch import Tensor
 import torch.nn as nn
@@ -19,6 +20,15 @@ model_urls = {
     'wide_resnet50_2': 'https://download.pytorch.org/models/wide_resnet50_2-95faca4d.pth',
     'wide_resnet101_2': 'https://download.pytorch.org/models/wide_resnet101_2-32ee1156.pth',
 }
+
+def init_layer(L):
+    # Initialization using fan-in
+    if isinstance(L, nn.Conv2d):
+        n = L.kernel_size[0]*L.kernel_size[1]*L.out_channels
+        L.weight.data.normal_(0,math.sqrt(2.0/float(n)))
+    elif isinstance(L, nn.BatchNorm2d):
+        L.weight.data.fill_(1)
+        L.bias.data.fill_(0)
 
 def conv3x3(in_planes: int, out_planes: int, stride: int = 1, groups: int = 1, dilation: int = 1) -> nn.Conv2d:
     """3x3 convolution with padding"""
@@ -197,6 +207,11 @@ class ResNet(backbone_base):
                     nn.init.constant_(m.bn3.weight, 0)  # type: ignore[arg-type]
                 elif isinstance(m, BasicBlock):
                     nn.init.constant_(m.bn2.weight, 0)  # type: ignore[arg-type]
+        
+        if 'protonet' in cfg.name:
+            # for protonet
+            for m in self.modules():
+                init_layer(m)
 
     def _make_layer(self, block: Type[Union[BasicBlock, Bottleneck]], planes: int, blocks: int,
                     stride: int = 1, dilate: bool = False) -> nn.Sequential:

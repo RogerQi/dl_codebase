@@ -20,6 +20,14 @@ def dispatcher(cfg, feature_shape, num_classes = -1):
         import classifier.fc as fc
         fc_classifier = fc.fc(cfg, feature_shape, num_classes)
         return fc_classifier
+    elif classifier_name == "cos":
+        import classifier.cos as cos
+        cos_classifier = cos.cos(cfg, feature_shape, num_classes)
+        return cos_classifier
+    elif classifier_name == "euclidean":
+        import classifier.euclidean as euclidean
+        l2_classifier = euclidean.euclidean(cfg, feature_shape, num_classes)
+        return l2_classifier
     elif classifier_name == "c1":
         import classifier.c1 as c1
         c1_seghead = c1.c1(cfg, feature_shape, num_classes)
