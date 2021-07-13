@@ -1,6 +1,7 @@
 import __init_lib_path
 from config_guard import cfg, update_config_from_yaml
 import dataset
+from dataset.special_loader import get_fs_seg_loader
 import backbone
 import classifier
 import loss
@@ -119,17 +120,15 @@ def meta_test(cfg, backbone_net, feature_shape, criterion, device, meta_test_set
     for i in range(len(meta_test_task)):
         np.random.seed(seed_list[i])
         random.seed(seed_list[i])
-        for j in tqdm(range(len(meta_test_task[i]))):
-            meta_test_batch = meta_test_set.episodic_sample(num_shots)
-            meta_test_task[i][j] = meta_test_batch
-
-            if False:
-                plt.imshow((meta_test_batch['query_mask_bhw'][0] == 1).cpu().numpy())
-                plt.imshow((meta_test_batch['supp_mask_bhw'][0] == 1).cpu().numpy())
+        meta_loader = get_fs_seg_loader(meta_test_set, 1000, 1, num_shots, 1)
+        for j, meta_test_batch in tqdm(enumerate(meta_loader)):
+            meta_test_batch = meta_test_batch[0]
 
             tp_cnt, fp_cnt, fn_cnt, tn_cnt = meta_test_one(cfg, backbone_net, criterion, feature_shape, device, meta_test_batch)
             
             # Gather episode-wise statistics
+            meta_test_task[i][j] = {}
+            meta_test_task[i][j]['sampled_class_id'] = meta_test_batch['sampled_class_id']
             meta_test_task[i][j]['tp_pixel_cnt'] = tp_cnt
             meta_test_task[i][j]['fp_pixel_cnt'] = fp_cnt
             meta_test_task[i][j]['fn_pixel_cnt'] = fn_cnt

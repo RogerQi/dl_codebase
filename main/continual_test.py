@@ -2,6 +2,7 @@ import __init_lib_path
 from config_guard import cfg, update_config_from_yaml
 import dataset
 import backbone
+from backbone.deeplabv3_renorm import BatchRenorm2d
 import classifier
 import loss
 import utils
@@ -110,7 +111,7 @@ def masked_average_pooling(mask_b1hw, feature_bchw, normalization):
     batch_pooled_vec = torch.sum(feature_bchw * mask_b1hw, dim = (2, 3)) / (mask_b1hw.sum(dim = (2, 3)) + 1e-5) # B x C
     return torch.mean(batch_pooled_vec, dim=0)
 
-def continual_test_one(cfg, backbone_net, ori_post_processor, criterion, feature_shape, device, continual_test_loader, support_set, continual_vanilla_train_set, continual_aug_train_set, ft_method):
+def continual_test_one(cfg, backbone_net, ori_backbone_net, ori_post_processor, criterion, feature_shape, device, continual_test_loader, support_set, continual_vanilla_train_set, continual_aug_train_set, ft_method):
     backbone_net.eval()
     num_classes = 21 # 20 fg + 1 bg in VOC
     assert ori_post_processor.pixel_classifier.class_mat.weight.data.shape[0] + len(support_set.keys()) == num_classes
@@ -119,43 +120,33 @@ def continual_test_one(cfg, backbone_net, ori_post_processor, criterion, feature
 
     ori_cnt = 0
     class_weight_vec_list = []
-    for c in range(num_classes):
-        if c in support_set:
-            # Aggregate all candidates in support set
-            image_list = []
-            mask_list = []
-            for n_c in support_set:
-                for idx in support_set[n_c]:
-                    supp_img_chw, supp_mask_hw = continual_vanilla_train_set[idx]
-                    if c in supp_mask_hw:
-                        image_list.append(supp_img_chw)
-                        mask_list.append(supp_mask_hw)
-            # novel class. Use MAP to initialize weight
-            supp_img_bchw_tensor = torch.stack(image_list).cuda()
-            supp_mask_bhw_tensor = torch.stack(mask_list).cuda()
-            # Sanity check to make sure that there are at least some foreground pixels
-            for b in range(supp_mask_bhw_tensor.shape[0]):
-                assert c in supp_mask_bhw_tensor[b]
-            with torch.no_grad():
-                support_feature = backbone_net(supp_img_bchw_tensor)
-                if True:
+    with torch.no_grad():
+        for c in range(num_classes):
+            if c in support_set:
+                # Aggregate all candidates in support set
+                image_list = []
+                mask_list = []
+                for n_c in support_set:
+                    for idx in support_set[n_c]:
+                        supp_img_chw, supp_mask_hw = continual_vanilla_train_set[idx]
+                        if c in supp_mask_hw:
+                            image_list.append(supp_img_chw)
+                            mask_list.append(supp_mask_hw)
+                # novel class. Use MAP to initialize weight
+                supp_img_bchw_tensor = torch.stack(image_list).cuda()
+                supp_mask_bhw_tensor = torch.stack(mask_list).cuda()
+                # Sanity check to make sure that there are at least some foreground pixels
+                for b in range(supp_mask_bhw_tensor.shape[0]):
+                    assert c in supp_mask_bhw_tensor[b]
+                with torch.no_grad():
+                    support_feature = backbone_net(supp_img_bchw_tensor)
                     class_weight_vec = masked_average_pooling(supp_mask_bhw_tensor == c, support_feature, True)
-                else:
-                    weight_vec_list = []
-                    for b in range(supp_mask_bhw_tensor.shape[0]):
-                        single_supp_mask_hw = (supp_mask_bhw_tensor[b] == c)
-                        single_supp_mask_bhw = single_supp_mask_hw.view((1,) + single_supp_mask_hw.shape)
-                        single_supp_feature_bchw = support_feature[b].view((1,) + support_feature.shape[1:])
-                        single_class_vec = masked_average_pooling(single_supp_mask_bhw, single_supp_feature_bchw, True) # C
-                        weight_vec_list.append(single_class_vec)
-                    class_weight_vec = torch.stack(weight_vec_list) # num_shots x C
-                    class_weight_vec = torch.mean(class_weight_vec, dim=0) # C
-        else:
-            # base class. Copy weight from learned HEAD
-            class_weight_vec = ori_post_processor.pixel_classifier.class_mat.weight.data[ori_cnt]
-            ori_cnt += 1
-        class_weight_vec = class_weight_vec.reshape((-1, 1, 1)) # C x 1 x 1
-        class_weight_vec_list.append(class_weight_vec)
+            else:
+                # base class. Copy weight from learned HEAD
+                class_weight_vec = ori_post_processor.pixel_classifier.class_mat.weight.data[ori_cnt]
+                ori_cnt += 1
+            class_weight_vec = class_weight_vec.reshape((-1, 1, 1)) # C x 1 x 1
+            class_weight_vec_list.append(class_weight_vec)
     
     classifier_weight = torch.stack(class_weight_vec_list) # num_classes x C x 1 x 1
     post_processor.pixel_classifier.class_mat.weight.data = classifier_weight
@@ -172,26 +163,29 @@ def continual_test_one(cfg, backbone_net, ori_post_processor, criterion, feature
 
             trainable_params = [
                 {"params": backbone_net.parameters()},
-                {"params": post_processor.parameters(), "lr": 1e-2}
+                {"params": post_processor.parameters(), "lr": 1e-3}
             ]
 
             if True:
+                cnt = 0
                 # Freeze batch norm statistics
                 for module in backbone_net.modules():
-                    if isinstance(module, nn.BatchNorm2d):
+                    if isinstance(module, nn.BatchNorm2d) or isinstance(module, BatchRenorm2d):
                         if hasattr(module, 'weight'):
                             module.weight.requires_grad_(False)
                         if hasattr(module, 'bias'):
                             module.bias.requires_grad_(False)
                         module.eval()
+                        cnt += 1
+                print("Number of batchnorm module frozen: {}".format(cnt))
 
         # optimizer = optim.Adadelta(trainable_params, lr = 1e-2, weight_decay = 0)
-        optimizer = optim.SGD(trainable_params, lr = 1e-2, momentum = 0.9)
+        optimizer = optim.SGD(trainable_params, lr = 1e-3, momentum = 0.9)
         
-        max_iter = 30
+        max_iter = 1000
         def polynomial_schedule(epoch):
             # from https://arxiv.org/pdf/2012.01415.pdf
-            return 1
+            # return 1
             return (1 - epoch / max_iter)**0.9
         batch_size = 5 # min(10, D_n) in GIFS
 
@@ -204,21 +198,40 @@ def continual_test_one(cfg, backbone_net, ori_post_processor, criterion, feature
 
         supp_set_size = len(img_idx_list)
 
+        l2_criterion = nn.MSELoss()
+
         with trange(1, max_iter + 1, dynamic_ncols=True) as t:
             for iter_i in t:
                 shuffled_idx = torch.randperm(supp_set_size)[:batch_size]
                 image_list = []
                 mask_list = []
                 for idx in shuffled_idx:
-                    img_chw, mask_hw = continual_vanilla_train_set[img_idx_list[idx]]
+                    img_chw, mask_hw = continual_aug_train_set[img_idx_list[idx]]
                     image_list.append(img_chw)
                     mask_list.append(mask_hw)
                 data_bchw = torch.stack(image_list).cuda()
                 target_bhw = torch.stack(mask_list).cuda()
                 feature = backbone_net(data_bchw)
                 ori_spatial_res = data_bchw.shape[-2:]
-                output = post_processor(feature, ori_spatial_res)
+                output = post_processor(feature, ori_spatial_res, scale_factor=10)
+                # new_output = torch.zeros_like(output)
+                # new_output[:,0,:,:] = output[:,0,:,:]
+                # new_output[:,1:16,:,:] = output[:,1:16,:,:].detach().clone()
+                # new_output[:,16:21,:,:] = output[:,16:21,:,:]
                 loss = criterion(output, target_bhw)
+                if True:
+                    # L2 regularization on feature extractor
+                    with torch.no_grad():
+                        ori_feature = ori_backbone_net(data_bchw)
+                    regularization_loss = l2_criterion(feature, ori_feature)
+                    regularization_loss = regularization_loss * 0.1 # hyperparameter lambda
+                    loss = loss + regularization_loss
+                    if False:
+                        # L2 regulalrization on base classes
+                        with torch.no_grad():
+                            ori_logit = ori_post_processor(ori_feature, ori_spatial_res, scale_factor=10)
+                        clf_loss = l2_criterion(output[:,:16,:,:], ori_logit) * 0.1
+                        loss = loss + clf_loss
                 optimizer.zero_grad() # reset gradient
                 loss.backward()
                 optimizer.step()
@@ -230,15 +243,15 @@ def continual_test_one(cfg, backbone_net, ori_post_processor, criterion, feature
     # Evaluation
     return test(cfg, backbone_net, post_processor, criterion, device, continual_test_loader, num_classes, 9999999999999)
 
-def continual_test(cfg, backbone_net, ori_post_processor, trained_weight_dict, feature_shape, criterion, device, continual_vanilla_train_set, continual_aug_train_set, continual_test_loader, testing_label_candidates):
+def continual_test(cfg, backbone_net, ori_backbone_net, ori_post_processor, trained_weight_dict, feature_shape, criterion, device, continual_vanilla_train_set, continual_aug_train_set, continual_test_loader, testing_label_candidates):
     backbone_net.eval()
 
     # Some assertions and prepare necessary variables
     assert cfg.task.startswith('few_shot')
     assert cfg.DATASET.dataset == "pascal_5i"
-    num_shots = 1
-    num_runs = 5
-    ft_method = "none" # "classifier_only", "whole_network", "none"
+    num_shots = 2
+    num_runs = 10
+    ft_method = "whole_network" # "classifier_only", "whole_network", "none"
     assert num_shots != -1
 
     # Parse image candidates
@@ -267,11 +280,13 @@ def continual_test(cfg, backbone_net, ori_post_processor, trained_weight_dict, f
 
         # Refresh weights    
         backbone_net.load_state_dict(trained_weight_dict['backbone'], strict=True)
+        ori_backbone_net.load_state_dict(trained_weight_dict['backbone'], strict=True)
         ori_post_processor.load_state_dict(trained_weight_dict["head"], strict=True)
+        ori_backbone_net.eval()
         backbone_net.eval()
         ori_post_processor.eval()
     
-        classwise_iou = continual_test_one(cfg, backbone_net, ori_post_processor, criterion, feature_shape, device, continual_test_loader, support_set, continual_vanilla_train_set, continual_aug_train_set, ft_method)
+        classwise_iou = continual_test_one(cfg, backbone_net, ori_backbone_net, ori_post_processor, criterion, feature_shape, device, continual_test_loader, support_set, continual_vanilla_train_set, continual_aug_train_set, ft_method)
         novel_iou_list = []
         base_iou_list = []
         for i in range(len(classwise_iou)):
@@ -339,6 +354,9 @@ def main():
     backbone_net = backbone.dispatcher(cfg)
     backbone_net = backbone_net(cfg).to(device)
 
+    ori_backbone_net = backbone.dispatcher(cfg)
+    ori_backbone_net = ori_backbone_net(cfg).to(device)
+
     feature_shape = backbone_net.get_feature_tensor_shape(device)
     print("Feature shape: {}".format(feature_shape))
 
@@ -350,7 +368,7 @@ def main():
 
     criterion = loss.dispatcher(cfg)
 
-    continual_test(cfg, backbone_net, ori_post_processor, trained_weight_dict, feature_shape, criterion, device, continual_vanilla_train_set, continual_aug_train_set, continual_test_loader, testing_label_candidates)
+    continual_test(cfg, backbone_net, ori_backbone_net, ori_post_processor, trained_weight_dict, feature_shape, criterion, device, continual_vanilla_train_set, continual_aug_train_set, continual_test_loader, testing_label_candidates)
 
 if __name__ == '__main__':
     main()

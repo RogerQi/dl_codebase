@@ -142,7 +142,7 @@ def get_val_set(cfg):
 
 def get_meta_train_set(cfg):
     folding = cfg.DATASET.PASCAL5i.folding
-    ds = Pascal5iReader('/data', folding, False, True, exclude_novel=False)
+    ds = Pascal5iReader('/data', folding, True, True, exclude_novel=False)
     return base_set(ds, "train", cfg)
 
 def get_meta_test_set(cfg):
