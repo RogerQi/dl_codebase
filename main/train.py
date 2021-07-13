@@ -17,7 +17,8 @@ import torch.nn.functional as F
 def parse_args():
     parser = argparse.ArgumentParser(description = "Roger's Deep Learning Playground")
     parser.add_argument('--cfg', help = "specify particular yaml configuration to use", required = True,
-        default = "configs/mnist_torch_official.taml", type = str)
+        default = "configs/mnist_torch_official.yaml", type = str)
+    parser.add_argument('--resume', help = "resume training from checkpoint", required=False, default = "NA", type = str)
     args = parser.parse_args()
 
     return args
@@ -27,6 +28,7 @@ def train(cfg, model, post_processor, criterion, device, train_loader, optimizer
     post_processor.train()
     start_cp = time.time()
     for batch_idx, (data, target) in enumerate(train_loader):
+        optimizer.zero_grad() # reset gradient
         data, target = data.to(device), target.to(device)
         if cfg.TRAIN.freeze_backbone:
             with torch.no_grad():
@@ -39,7 +41,6 @@ def train(cfg, model, post_processor, criterion, device, train_loader, optimizer
             ori_spatial_res = data.shape[-2:]
             output = post_processor(feature, ori_spatial_res)
         loss = criterion(output, target)
-        optimizer.zero_grad() # reset gradient
         loss.backward()
         optimizer.step()
         if cfg.task == "classification":
@@ -188,6 +189,15 @@ def main():
         else:
             backbone_net.load_state_dict(pretrained_weight_dict, strict=False)
 
+    start_epoch = 1
+    if args.resume != "NA":
+        sub_str = args.resume[args.resume.index('epoch') + 5:]
+        start_epoch = int(sub_str[:sub_str.index('_')]) + 1
+        assert start_epoch < cfg.TRAIN.max_epochs
+        print("Resuming training from epoch {}".format(start_epoch))
+        trained_weight_dict = torch.load(args.resume, map_location=device_str)
+        backbone_net.load_state_dict(trained_weight_dict['backbone'], strict=True)
+        post_processor.load_state_dict(trained_weight_dict['head'], strict=True)
 
     criterion = loss.dispatcher(cfg)
 
@@ -223,7 +233,11 @@ def main():
 
     best_val_metric = 0
 
-    for epoch in range(1, cfg.TRAIN.max_epochs + 1):
+    # Tune LR scheduler
+    for epoch in range(1, start_epoch):
+        scheduler.step()
+
+    for epoch in range(start_epoch, cfg.TRAIN.max_epochs + 1):
         start_cp = time.time()
         train(cfg, backbone_net, post_processor, criterion, device, train_loader, optimizer, epoch)
         scheduler.step()
