@@ -16,9 +16,6 @@ BACKBONE:
 
 CLASSIFIER:
   classifier: "plain_c1"
-  # classifier: "seg_cos"
-  SEGHEAD:
-    use_bilinear_interpolation: True
 
 LOSS:
   loss: 'semantic_nllloss'

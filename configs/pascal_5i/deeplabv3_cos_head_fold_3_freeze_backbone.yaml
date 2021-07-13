@@ -14,16 +14,10 @@ BACKBONE:
   network: 'deeplabv3_resnet101'
   pooling: False
   use_pretrained: True
-  pretrained_path: "/data/trained_weights/discriminative_deeplab_resnet101_no_last_relu.pth"
+  pretrained_path: "/home/roger/reproduction/PANet/runs/PANet_VOC_deeplab_sets_3_1way_1shot_[train]/17/snapshots/10000.pth"
 
 CLASSIFIER:
   classifier: "seg_cos"
-  SEGHEAD:
-    use_bilinear_interpolation: True
-    COSINE:
-      weight_norm: False
-      train_scale_factor: 10
-      val_scale_factor: 3
 
 LOSS:
   loss: 'semantic_nllloss'

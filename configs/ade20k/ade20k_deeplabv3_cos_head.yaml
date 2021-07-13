@@ -15,14 +15,7 @@ BACKBONE:
   pretrained_path: "/data/pretrained_model/resnet101-5d3b4d8f.pth"
 
 CLASSIFIER:
-  # classifier: "plain_c1"
   classifier: "seg_cos"
-  SEGHEAD:
-    use_bilinear_interpolation: True
-    COSINE:
-      weight_norm: False
-      train_scale_factor: 20
-      val_scale_factor: 3
 
 LOSS:
   loss: 'semantic_nllloss'

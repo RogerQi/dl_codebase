@@ -48,12 +48,6 @@ _C.CLASSIFIER.factor = 0
 _C.CLASSIFIER.FC = CN()
 _C.CLASSIFIER.FC.hidden_layers = (1024,)
 _C.CLASSIFIER.FC.bias = False
-_C.CLASSIFIER.SEGHEAD = CN()
-_C.CLASSIFIER.SEGHEAD.use_bilinear_interpolation = True
-_C.CLASSIFIER.SEGHEAD.COSINE = CN()
-_C.CLASSIFIER.SEGHEAD.COSINE.weight_norm = False
-_C.CLASSIFIER.SEGHEAD.COSINE.train_scale_factor = 50
-_C.CLASSIFIER.SEGHEAD.COSINE.val_scale_factor = 3
 
 #######################
 # Network (ignore backbone & classification)

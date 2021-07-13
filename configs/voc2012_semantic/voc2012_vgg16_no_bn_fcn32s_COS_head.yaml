@@ -16,12 +16,6 @@ BACKBONE:
 
 CLASSIFIER:
   classifier: "fcn32s_cos"
-  SEGHEAD:
-    use_bilinear_interpolation: True
-    COSINE:
-      weight_norm: False
-      train_scale_factor: 50
-      val_scale_factor: 3
 
 LOSS:
   loss: 'semantic_nllloss'
