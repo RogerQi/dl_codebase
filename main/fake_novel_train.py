@@ -76,7 +76,6 @@ def train(cfg, model, post_processor, criterion, device, train_loader, optimizer
                 original_vec = post_processor.pixel_classifier.class_mat.weight.data[selected_class_idx]
                 post_processor.pixel_classifier.class_mat.weight.data[selected_class_idx] = fake_novel_vec
         data, target = data.to(device), target.to(device)
-        assert not cfg.TRAIN.freeze_backbone
         feature = model(data)
         # Generate fake novel vector
         assert cfg.task != "classification"
@@ -235,10 +234,7 @@ def main():
 
     criterion = loss.dispatcher(cfg)
 
-    if cfg.TRAIN.freeze_backbone:
-        trainable_params = list(post_processor.parameters())
-    else:
-        trainable_params = list(backbone_net.parameters()) + list(post_processor.parameters())
+    trainable_params = list(backbone_net.parameters()) + list(post_processor.parameters())
 
     if cfg.TRAIN.OPTIMIZER.type == "adadelta":
         optimizer = optim.Adadelta(trainable_params, lr = cfg.TRAIN.initial_lr,
