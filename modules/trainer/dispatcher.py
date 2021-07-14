@@ -11,5 +11,8 @@ def dispatcher(cfg):
     elif task_name == "semantic_segmentation":
         from .seg_trainer import seg_trainer as seg_trainer_fn
         return seg_trainer_fn
+    elif task_name == "few_shot_semantic_segmentation_fine_tuning":
+        from .fs_ft_seg_trainer import fs_ft_seg_trainer as fs_ft_seg_trainer_fn
+        return fs_ft_seg_trainer_fn
     else:
         raise NotImplementedError

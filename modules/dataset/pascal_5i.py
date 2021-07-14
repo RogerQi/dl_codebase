@@ -39,6 +39,7 @@ class Pascal5iReader(torchvision.datasets.vision.VisionDataset):
 
         # Get augmented VOC dataset
         self.vanilla_ds = PascalVOCSegReader(root, split, download=True)
+        self.CLASS_NAMES_LIST = self.vanilla_ds.CLASS_NAMES_LIST
 
         # Split dataset based on folding. Refer to https://arxiv.org/pdf/1709.03410.pdf
         # Given fold number, define L_{test}

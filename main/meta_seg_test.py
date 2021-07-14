@@ -100,6 +100,7 @@ def meta_test_one(cfg, backbone_net, criterion, feature_shape, device, meta_test
         tn_cnt = torch.logical_and(predicted_bg, query_mask_bhw_tensor != 1).sum()
     
     return tp_cnt, fp_cnt, fn_cnt, tn_cnt
+
 def meta_test(cfg, backbone_net, feature_shape, criterion, device, meta_test_set):
     backbone_net.eval()
 
