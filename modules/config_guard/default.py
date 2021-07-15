@@ -127,6 +127,8 @@ _C.DATASET.NUMPY_READER.test_label_npy_path = "/"
 _C.DATASET.NUMPY_READER.mmap = False
 _C.DATASET.PASCAL5i = CN()
 _C.DATASET.PASCAL5i.folding = -1
+_C.DATASET.COCO20i = CN()
+_C.DATASET.COCO20i.folding = -1
 
 #######################
 # Transform Settings

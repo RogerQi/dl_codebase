@@ -22,6 +22,8 @@ def dispatcher(cfg):
         from .pascal_5i import get_train_set, get_val_set
     elif dataset_name == "scannet_25k":
         from .scannet_25k import get_train_set, get_val_set
+    elif dataset_name == "coco_20i":
+        from .coco_20i import get_train_set, get_val_set
     else:
         raise NotImplementedError
     return [get_train_set(cfg), get_val_set(cfg)]
