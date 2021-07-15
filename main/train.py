@@ -4,6 +4,7 @@ import dataset
 import backbone
 import classifier
 import loss
+import trainer
 import utils
 
 import time
@@ -23,107 +24,6 @@ def parse_args():
 
     return args
 
-def train(cfg, model, post_processor, criterion, device, train_loader, optimizer, epoch):
-    model.train()
-    post_processor.train()
-    start_cp = time.time()
-    for batch_idx, (data, target) in enumerate(train_loader):
-        optimizer.zero_grad() # reset gradient
-        data, target = data.to(device), target.to(device)
-        feature = model(data)
-        if cfg.task == "classification":
-            output = post_processor(feature)
-        elif cfg.task == "semantic_segmentation" or cfg.task == "few_shot_semantic_segmentation_fine_tuning":
-            ori_spatial_res = data.shape[-2:]
-            output = post_processor(feature, ori_spatial_res)
-        loss = criterion(output, target)
-        loss.backward()
-        optimizer.step()
-        if cfg.task == "classification":
-            if batch_idx % cfg.TRAIN.log_interval == 0:
-                pred = output.argmax(dim = 1, keepdim = True)
-                correct_prediction = pred.eq(target.view_as(pred)).sum().item()
-                batch_acc = correct_prediction / data.shape[0]
-                print('Train Epoch: {0} [{1}/{2} ({3:.0f}%)]\tLoss: {4:.6f}\tBatch Acc: {5:.6f} Epoch Elapsed Time: {6:.1f}'.format(
-                    epoch, batch_idx * len(data), len(train_loader.dataset),
-                    100. * batch_idx / len(train_loader), loss.item(), batch_acc, time.time() - start_cp))
-        elif cfg.task == "semantic_segmentation" or cfg.task == "few_shot_semantic_segmentation_fine_tuning":
-            if batch_idx % cfg.TRAIN.log_interval == 0:
-                pred_map = output.max(dim = 1)[1]
-                batch_acc, _ = utils.compute_pixel_acc(pred_map, target, fg_only=cfg.METRIC.SEGMENTATION.fg_only)
-                print('Train Epoch: {0} [{1}/{2} ({3:.0f}%)]\tLoss: {4:.6f}\tBatch Pixel Acc: {5:.6f} Epoch Elapsed Time: {6:.1f}'.format(
-                    epoch, batch_idx * len(data), len(train_loader.dataset),
-                    100. * batch_idx / len(train_loader), loss.item(), batch_acc, time.time() - start_cp))
-        else:
-            raise NotImplementedError
-
-
-def test(cfg, model, post_processor, criterion, device, test_loader):
-    """
-    Return: a validation metric between 0-1 where 1 is perfect
-    """
-    model.eval()
-    post_processor.eval()
-    test_loss = 0
-    correct = 0
-    # TODO: use a more consistent evaluation interface
-    pixel_acc_list = []
-    iou_list = []
-    with torch.no_grad():
-        for data, target in test_loader:
-            data, target = data.to(device), target.to(device)
-            feature = model(data)
-            if cfg.task == "classification":
-                output = post_processor(feature)
-            elif cfg.task == "semantic_segmentation" or cfg.task == "few_shot_semantic_segmentation_fine_tuning":
-                ori_spatial_res = data.shape[-2:]
-                output = post_processor(feature, ori_spatial_res)
-            test_loss += criterion(output, target).item()  # sum up batch loss
-            if cfg.task == "classification":
-                pred = output.argmax(dim = 1, keepdim = True)
-                correct += pred.eq(target.view_as(pred)).sum().item()
-            elif cfg.task == "semantic_segmentation":
-                pred_map = output.max(dim = 1)[1]
-                batch_acc, _ = utils.compute_pixel_acc(pred_map, target, fg_only=cfg.METRIC.SEGMENTATION.fg_only)
-                pixel_acc_list.append(float(batch_acc))
-                for i in range(pred_map.shape[0]):
-                    iou = utils.compute_iou(
-                        np.array(pred_map[i].cpu()),
-                        np.array(target[i].cpu(), dtype=np.int64),
-                        cfg.num_classes,
-                        fg_only=cfg.METRIC.SEGMENTATION.fg_only
-                    )
-                    iou_list.append(float(iou))
-            elif cfg.task == "few_shot_semantic_segmentation_fine_tuning":
-                pred_map = output.max(dim = 1)[1]
-                batch_acc, _ = utils.compute_pixel_acc(pred_map, target, fg_only=cfg.METRIC.SEGMENTATION.fg_only)
-                pixel_acc_list.append(float(batch_acc))
-                for i in range(pred_map.shape[0]):
-                    iou = utils.compute_iou(
-                        np.array(pred_map[i].cpu()),
-                        np.array(target[i].cpu(), dtype=np.int64),
-                        cfg.meta_training_num_classes,
-                        fg_only=cfg.METRIC.SEGMENTATION.fg_only
-                    )
-                    iou_list.append(float(iou))
-            else:
-                raise NotImplementedError
-
-        test_loss /= len(test_loader.dataset)
-
-        if cfg.task == "classification":
-            acc = 100. * correct / len(test_loader.dataset)
-            print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)'.format(
-                test_loss, correct, len(test_loader.dataset), acc))
-            return acc
-        elif cfg.task == "semantic_segmentation" or cfg.task == "few_shot_semantic_segmentation_fine_tuning":
-            m_iou = np.mean(iou_list)
-            print('\nTest set: Average loss: {:.4f}, Mean Pixel Accuracy: {:.4f}, Mean IoU {:.4f}'.format(
-                test_loss, np.mean(pixel_acc_list), m_iou))
-            return m_iou
-        else:
-            raise NotImplementedError
-
 def main():
     # --------------------------
     # | Initial set up
@@ -140,20 +40,12 @@ def main():
     device_str = "cuda" if use_cuda else "cpu"
     device = torch.device(device_str)
 
-    kwargs = {'num_workers': cfg.SYSTEM.num_workers, 'pin_memory': cfg.SYSTEM.pin_memory} if use_cuda else {}
-
     torch.manual_seed(cfg.seed)
 
     # --------------------------
     # | Prepare datasets
     # --------------------------
-    train_set, test_set = dataset.dispatcher(cfg)
-
-    print("Training set contains {} data points.".format(len(train_set)))
-    print("Test/Val set contains {} data points.".format(len(test_set)))
-
-    train_loader = torch.utils.data.DataLoader(train_set, batch_size=cfg.TRAIN.batch_size, shuffle=True, **kwargs)
-    test_loader = torch.utils.data.DataLoader(test_set, batch_size=cfg.TEST.batch_size, shuffle=True, **kwargs)
+    dataset_module = dataset.dataset_dispatcher(cfg)
 
     # --------------------------
     # | Get ready to learn
@@ -229,14 +121,17 @@ def main():
     # Tune LR scheduler
     for epoch in range(1, start_epoch):
         scheduler.step()
+    
+    trainer_func = trainer.dispatcher(cfg)
+    my_trainer = trainer_func(cfg, backbone_net, post_processor, criterion, dataset_module, device)
 
     for epoch in range(start_epoch, cfg.TRAIN.max_epochs + 1):
         start_cp = time.time()
-        train(cfg, backbone_net, post_processor, criterion, device, train_loader, optimizer, epoch)
+        my_trainer.train_one(device, optimizer, epoch)
         scheduler.step()
         print("Training took {:.4f} seconds".format(time.time() - start_cp))
         start_cp = time.time()
-        val_metric = test(cfg, backbone_net, post_processor, criterion, device, test_loader)
+        val_metric = my_trainer.val_one(device)
         print("Eval took {:.4f} seconds.".format(time.time() - start_cp))
         if val_metric > best_val_metric:
             print("Epoch {} New Best Model w/ metric: {:.4f}".format(epoch, val_metric))
@@ -244,24 +139,13 @@ def main():
             if cfg.save_model:
                 best_model_path = "{0}_epoch{1}_{2:.4f}.pt".format(cfg.name, epoch, best_val_metric)
                 print("Saving model to {}".format(best_model_path))
-                torch.save(
-                    {
-                        "backbone": backbone_net.state_dict(),
-                        "head": post_processor.state_dict()
-                    },
-                    best_model_path
-                )
+                my_trainer.save_model(best_model_path)
+                
         print("===================================\n")
 
     if cfg.save_model:
-        torch.save(
-                {
-                    "backbone": backbone_net.state_dict(),
-                    "head": post_processor.state_dict()
-                },
-                "{0}_final.pt".format(cfg.name)
-            )
-
+        final_name = "{0}_final.pt".format(cfg.name)
+        my_trainer.save_model(final_name)
 
 if __name__ == '__main__':
     main()
