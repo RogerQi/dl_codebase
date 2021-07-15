@@ -86,7 +86,6 @@ class fs_ft_seg_trainer(trainer_base):
         return m_iou
 
     def test_one(self, device, num_runs=5):
-        feature_shape = self.backbone_net.get_feature_tensor_shape(device)
         meta_test_task = [[None for j in range(1000)] for i in range(num_runs)]
         # Meta Test!
         iou_list = []
@@ -94,7 +93,7 @@ class fs_ft_seg_trainer(trainer_base):
             for j, meta_test_batch in tqdm(enumerate(self.meta_test_loader)):
                 meta_test_batch = meta_test_batch[0]
 
-                tp_cnt, fp_cnt, fn_cnt, tn_cnt = meta_test_one(self.cfg, self.backbone_net, self.criterion, feature_shape, device, meta_test_batch)
+                tp_cnt, fp_cnt, fn_cnt, tn_cnt = meta_test_one(self.cfg, self.backbone_net, self.criterion, self.feature_shape, device, meta_test_batch)
                 
                 # Gather episode-wise statistics
                 meta_test_task[i][j] = {}

@@ -9,6 +9,7 @@ class trainer_base:
         self.post_processor = post_processor
         self.criterion = criterion
         self.device = device
+        self.feature_shape = self.backbone_net.get_feature_tensor_shape(self.device)
 
         # Obtain dataset
         self.train_set = dataset_module.get_train_set(cfg)

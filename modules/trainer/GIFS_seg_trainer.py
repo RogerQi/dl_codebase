@@ -150,8 +150,7 @@ class GIFS_seg_trainer(trainer_base):
         num_classes = 21 # 20 fg + 1 bg in VOC
         assert self.post_processor.pixel_classifier.class_mat.weight.data.shape[0] + len(support_set.keys()) == num_classes
 
-        feature_shape = self.backbone_net.get_feature_tensor_shape(self.device)
-        temp_post_processor = classifier.dispatcher(self.cfg, feature_shape, num_classes=num_classes)
+        temp_post_processor = classifier.dispatcher(self.cfg, self.feature_shape, num_classes=num_classes)
         temp_post_processor = temp_post_processor.to(self.device)
 
         # Aggregate weights

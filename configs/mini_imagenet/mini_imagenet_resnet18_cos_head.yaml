@@ -1,5 +1,5 @@
 name: 'mini_imagenet_resnet18_cos_head'
-task: 'classification'
+task: 'few_shot_classification'
 input_dim: (3, 224, 224)
 num_classes: 64
 save_model: True
