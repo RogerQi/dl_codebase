@@ -1,12 +1,128 @@
 import time
+import random
+import argparse
 import numpy as np
+import matplotlib.pyplot as plt
 import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.nn.functional as F
 from tqdm import tqdm
 
 import classifier
 import utils
 
 from .trainer_base import trainer_base
+from dataset.special_loader import get_fs_seg_loader
+
+class fs_ft_seg_trainer(trainer_base):
+    def __init__(self, cfg, backbone_net, post_processor, criterion, dataset_module, device):
+        super(fs_ft_seg_trainer, self).__init__(cfg, backbone_net, post_processor, criterion, dataset_module, device)
+
+        # init meta test loader
+        self.meta_test_set = dataset_module.get_meta_test_set(cfg)
+
+        n_iter = 1000
+        n_query = 1
+        n_way = 1
+        n_shot = 1
+        self.meta_test_loader = get_fs_seg_loader(self.meta_test_set, n_iter, n_way, n_shot, n_query)
+
+    def train_one(self, device, optimizer, epoch):
+        self.backbone_net.train()
+        self.post_processor.train()
+        start_cp = time.time()
+        train_total_loss = 0
+        for batch_idx, (data, target) in enumerate(self.train_loader):
+            optimizer.zero_grad() # reset gradient
+            data, target = data.to(device), target.to(device)
+            feature = self.backbone_net(data)
+            ori_spatial_res = data.shape[-2:]
+            output = self.post_processor(feature, ori_spatial_res)
+            loss = self.criterion(output, target)
+            loss.backward()
+            train_total_loss += loss.item()
+            optimizer.step()
+            if batch_idx % self.cfg.TRAIN.log_interval == 0:
+                pred_map = output.max(dim = 1)[1]
+                batch_acc, _ = utils.compute_pixel_acc(pred_map, target, fg_only=self.cfg.METRIC.SEGMENTATION.fg_only)
+                print('Train Epoch: {0} [{1}/{2} ({3:.0f}%)]\tLoss: {4:.6f}\tBatch Pixel Acc: {5:.6f} Epoch Elapsed Time: {6:.1f}'.format(
+                    epoch, batch_idx * len(data), len(self.train_set),
+                    100. * batch_idx / len(self.train_loader), loss.item(), batch_acc, time.time() - start_cp))
+        
+        return train_total_loss / len(self.train_loader)
+
+    def val_one(self, device):
+        self.backbone_net.eval()
+        self.post_processor.eval()
+        test_loss = 0
+        correct = 0
+        pixel_acc_list = []
+        iou_list = []
+        with torch.no_grad():
+            for data, target in self.val_loader:
+                data, target = data.to(device), target.to(device)
+                feature = self.backbone_net(data)
+                ori_spatial_res = data.shape[-2:]
+                output = self.post_processor(feature, ori_spatial_res)
+                test_loss += self.criterion(output, target).item()  # sum up batch loss
+                pred_map = output.max(dim = 1)[1]
+                batch_acc, _ = utils.compute_pixel_acc(pred_map, target, fg_only=self.cfg.METRIC.SEGMENTATION.fg_only)
+                pixel_acc_list.append(float(batch_acc))
+                for i in range(pred_map.shape[0]):
+                    iou = utils.compute_iou(
+                        np.array(pred_map[i].cpu()),
+                        np.array(target[i].cpu(), dtype=np.int64),
+                        self.cfg.meta_training_num_classes,
+                        fg_only=self.cfg.METRIC.SEGMENTATION.fg_only
+                    )
+                    iou_list.append(float(iou))
+
+            test_loss /= len(self.val_set)
+
+            m_iou = np.mean(iou_list)
+            print('\nTest set: Average loss: {:.4f}, Mean Pixel Accuracy: {:.4f}, Mean IoU {:.4f}'.format(
+                test_loss, np.mean(pixel_acc_list), m_iou))
+        return m_iou
+
+    def test_one(self, device, num_runs=5):
+        feature_shape = self.backbone_net.get_feature_tensor_shape(device)
+        meta_test_task = [[None for j in range(1000)] for i in range(num_runs)]
+        # Meta Test!
+        iou_list = []
+        for i in range(num_runs):
+            for j, meta_test_batch in tqdm(enumerate(self.meta_test_loader)):
+                meta_test_batch = meta_test_batch[0]
+
+                tp_cnt, fp_cnt, fn_cnt, tn_cnt = meta_test_one(self.cfg, self.backbone_net, self.criterion, feature_shape, device, meta_test_batch)
+                
+                # Gather episode-wise statistics
+                meta_test_task[i][j] = {}
+                meta_test_task[i][j]['sampled_class_id'] = meta_test_batch['sampled_class_id']
+                meta_test_task[i][j]['tp_pixel_cnt'] = tp_cnt
+                meta_test_task[i][j]['fp_pixel_cnt'] = fp_cnt
+                meta_test_task[i][j]['fn_pixel_cnt'] = fn_cnt
+                meta_test_task[i][j]['tn_pixel_cnt'] = tn_cnt
+
+            # Gather test numbers
+            # TODO(roger): relax this to support dataset other than PASCAL-5i
+            total_tp_cnt = np.zeros((5,), dtype = np.int)
+            total_fp_cnt = np.zeros((5,), dtype = np.int)
+            total_fn_cnt = np.zeros((5,), dtype = np.int)
+            total_tn_cnt = np.zeros((5,), dtype = np.int)
+            for j, meta_test_batch in enumerate(meta_test_task[i]):
+                novel_class_id = meta_test_task[i][j]['sampled_class_id'] - 1 # from 1-indexed to 0-indexed
+                total_tp_cnt[novel_class_id] += meta_test_task[i][j]['tp_pixel_cnt']
+                total_fp_cnt[novel_class_id] += meta_test_task[i][j]['fp_pixel_cnt']
+                total_fn_cnt[novel_class_id] += meta_test_task[i][j]['fn_pixel_cnt']
+                total_tn_cnt[novel_class_id] += meta_test_task[i][j]['tn_pixel_cnt']
+            single_run_acc = np.sum(total_tp_cnt + total_tn_cnt) / np.sum(total_tp_cnt + total_fp_cnt + total_fn_cnt + total_tn_cnt)
+            classwise_iou = total_tp_cnt / (total_tp_cnt + total_fp_cnt + total_fn_cnt)
+            single_run_iou = np.mean(classwise_iou)
+            print("Accuracy: {:.4f} IoU: {:.4f}".format(single_run_acc, single_run_iou))
+            iou_list.append(single_run_iou)
+            
+        print("Overall IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(iou_list), np.std(iou_list)))
 
 def masked_average_pooling(mask_b1hw, feature_bchw, normalization=False):
     '''
@@ -80,107 +196,3 @@ def meta_test_one(cfg, backbone_net, criterion, feature_shape, device, meta_test
         tn_cnt = torch.logical_and(predicted_bg, query_mask_bhw_tensor != 1).sum()
     
     return tp_cnt, fp_cnt, fn_cnt, tn_cnt
-
-class fs_ft_seg_trainer(trainer_base):
-    def __init__(self, cfg, backbone_net, post_processor, criterion, device):
-        self.cfg = cfg
-        self.backbone_net = backbone_net
-        self.post_processor = post_processor
-        self.criterion = criterion
-        self.device = device
-
-    def train_one(self, device, train_loader, optimizer, epoch):
-        self.backbone_net.train()
-        self.post_processor.train()
-        start_cp = time.time()
-        train_total_loss = 0
-        for batch_idx, (data, target) in enumerate(train_loader):
-            optimizer.zero_grad() # reset gradient
-            data, target = data.to(device), target.to(device)
-            feature = self.backbone_net(data)
-            ori_spatial_res = data.shape[-2:]
-            output = self.post_processor(feature, ori_spatial_res)
-            loss = self.criterion(output, target)
-            loss.backward()
-            train_total_loss += loss.item()
-            optimizer.step()
-            if batch_idx % self.cfg.TRAIN.log_interval == 0:
-                pred_map = output.max(dim = 1)[1]
-                batch_acc, _ = utils.compute_pixel_acc(pred_map, target, fg_only=self.cfg.METRIC.SEGMENTATION.fg_only)
-                print('Train Epoch: {0} [{1}/{2} ({3:.0f}%)]\tLoss: {4:.6f}\tBatch Pixel Acc: {5:.6f} Epoch Elapsed Time: {6:.1f}'.format(
-                    epoch, batch_idx * len(data), len(train_loader.dataset),
-                    100. * batch_idx / len(train_loader), loss.item(), batch_acc, time.time() - start_cp))
-        
-        return train_total_loss / len(train_loader)
-
-    def val_one(self, device, val_loader):
-        self.backbone_net.eval()
-        self.post_processor.eval()
-        test_loss = 0
-        correct = 0
-        pixel_acc_list = []
-        iou_list = []
-        with torch.no_grad():
-            for data, target in val_loader:
-                data, target = data.to(device), target.to(device)
-                feature = self.backbone_net(data)
-                ori_spatial_res = data.shape[-2:]
-                output = self.post_processor(feature, ori_spatial_res)
-                test_loss += self.criterion(output, target).item()  # sum up batch loss
-                pred_map = output.max(dim = 1)[1]
-                batch_acc, _ = utils.compute_pixel_acc(pred_map, target, fg_only=self.cfg.METRIC.SEGMENTATION.fg_only)
-                pixel_acc_list.append(float(batch_acc))
-                for i in range(pred_map.shape[0]):
-                    iou = utils.compute_iou(
-                        np.array(pred_map[i].cpu()),
-                        np.array(target[i].cpu(), dtype=np.int64),
-                        self.cfg.meta_training_num_classes,
-                        fg_only=self.cfg.METRIC.SEGMENTATION.fg_only
-                    )
-                    iou_list.append(float(iou))
-
-            test_loss /= len(val_loader.dataset)
-
-            m_iou = np.mean(iou_list)
-            print('\nTest set: Average loss: {:.4f}, Mean Pixel Accuracy: {:.4f}, Mean IoU {:.4f}'.format(
-                test_loss, np.mean(pixel_acc_list), m_iou))
-        return m_iou
-
-    def test_one(self, device, test_loader, num_runs=5):
-        feature_shape = self.backbone_net.get_feature_tensor_shape(device)
-        meta_test_task = [[None for j in range(1000)] for i in range(num_runs)]
-        # Meta Test!
-        iou_list = []
-        for i in range(num_runs):
-            for j, meta_test_batch in tqdm(enumerate(test_loader)):
-                meta_test_batch = meta_test_batch[0]
-
-                tp_cnt, fp_cnt, fn_cnt, tn_cnt = meta_test_one(self.cfg, self.backbone_net, self.criterion, feature_shape, device, meta_test_batch)
-                
-                # Gather episode-wise statistics
-                meta_test_task[i][j] = {}
-                meta_test_task[i][j]['sampled_class_id'] = meta_test_batch['sampled_class_id']
-                meta_test_task[i][j]['tp_pixel_cnt'] = tp_cnt
-                meta_test_task[i][j]['fp_pixel_cnt'] = fp_cnt
-                meta_test_task[i][j]['fn_pixel_cnt'] = fn_cnt
-                meta_test_task[i][j]['tn_pixel_cnt'] = tn_cnt
-
-            # Gather test numbers
-            # TODO(roger): relax this to support dataset other than PASCAL-5i
-            total_tp_cnt = np.zeros((5,), dtype = np.int)
-            total_fp_cnt = np.zeros((5,), dtype = np.int)
-            total_fn_cnt = np.zeros((5,), dtype = np.int)
-            total_tn_cnt = np.zeros((5,), dtype = np.int)
-            for j, meta_test_batch in enumerate(meta_test_task[i]):
-                novel_class_id = meta_test_task[i][j]['sampled_class_id'] - 1 # from 1-indexed to 0-indexed
-                total_tp_cnt[novel_class_id] += meta_test_task[i][j]['tp_pixel_cnt']
-                total_fp_cnt[novel_class_id] += meta_test_task[i][j]['fp_pixel_cnt']
-                total_fn_cnt[novel_class_id] += meta_test_task[i][j]['fn_pixel_cnt']
-                total_tn_cnt[novel_class_id] += meta_test_task[i][j]['tn_pixel_cnt']
-            single_run_acc = np.sum(total_tp_cnt + total_tn_cnt) / np.sum(total_tp_cnt + total_fp_cnt + total_fn_cnt + total_tn_cnt)
-            classwise_iou = total_tp_cnt / (total_tp_cnt + total_fp_cnt + total_fn_cnt)
-            single_run_iou = np.mean(classwise_iou)
-            print("Accuracy: {:.4f} IoU: {:.4f}".format(single_run_acc, single_run_iou))
-            iou_list.append(single_run_iou)
-            
-        print("Overall IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(iou_list), np.std(iou_list)))

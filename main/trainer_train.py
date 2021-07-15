@@ -40,20 +40,12 @@ def main():
     device_str = "cuda" if use_cuda else "cpu"
     device = torch.device(device_str)
 
-    kwargs = {'num_workers': cfg.SYSTEM.num_workers, 'pin_memory': cfg.SYSTEM.pin_memory} if use_cuda else {}
-
     torch.manual_seed(cfg.seed)
 
     # --------------------------
     # | Prepare datasets
     # --------------------------
-    train_set, test_set = dataset.dispatcher(cfg)
-
-    print("Training set contains {} data points.".format(len(train_set)))
-    print("Test/Val set contains {} data points.".format(len(test_set)))
-
-    train_loader = torch.utils.data.DataLoader(train_set, batch_size=cfg.TRAIN.batch_size, shuffle=True, **kwargs)
-    test_loader = torch.utils.data.DataLoader(test_set, batch_size=cfg.TEST.batch_size, shuffle=True, **kwargs)
+    dataset_module = dataset.dataset_dispatcher(cfg)
 
     # --------------------------
     # | Get ready to learn
@@ -131,15 +123,15 @@ def main():
         scheduler.step()
     
     trainer_func = trainer.dispatcher(cfg)
-    my_trainer = trainer_func(cfg, backbone_net, post_processor, criterion, device)
+    my_trainer = trainer_func(cfg, backbone_net, post_processor, criterion, dataset_module, device)
 
     for epoch in range(start_epoch, cfg.TRAIN.max_epochs + 1):
         start_cp = time.time()
-        my_trainer.train_one(device, train_loader, optimizer, epoch)
+        my_trainer.train_one(device, optimizer, epoch)
         scheduler.step()
         print("Training took {:.4f} seconds".format(time.time() - start_cp))
         start_cp = time.time()
-        val_metric = my_trainer.val_one(device, test_loader)
+        val_metric = my_trainer.val_one(device)
         print("Eval took {:.4f} seconds.".format(time.time() - start_cp))
         if val_metric > best_val_metric:
             print("Epoch {} New Best Model w/ metric: {:.4f}".format(epoch, val_metric))
