@@ -129,7 +129,29 @@ class PascalVOCSegReader(datasets.vision.VisionDataset):
         - train: a bool flag to indicate whether L_{train} or L_{test} should be used
     """
 
-    CLASS_NAMES_LIST = ["background", "aeroplane", "bicycle", "bird", "boat", "bottle", "bus", "car", "cat", "chair", "cow", "diningtable", "dog", "horse", "motorbike", "person", "potted plant", "sheep", "sofa", "train", "tv/monitor"]
+    CLASS_NAMES_LIST = [
+        "background",
+        "aeroplane",
+        "bicycle",
+        "bird",
+        "boat",
+        "bottle",
+        "bus",
+        "car",
+        "cat",
+        "chair",
+        "cow",
+        "diningtable",
+        "dog",
+        "horse",
+        "motorbike",
+        "person",
+        "potted plant",
+        "sheep",
+        "sofa",
+        "train",
+        "tv/monitor"
+    ]
 
     def __init__(self, root, train, download=True):
         '''
@@ -189,6 +211,9 @@ class PascalVOCSegReader(datasets.vision.VisionDataset):
             - a list of all images in the dataset containing at least one pixel of the class
         """
         return deepcopy(self.class_map[class_id])
+    
+    def get_label_range(self):
+        return [i + 1 for i in range(20)]
 
     def __getitem__(self, idx):
         # For both SBD and VOC2012, images are stored as .jpg

@@ -35,5 +35,8 @@ def dataset_dispatcher(cfg):
     elif dataset_name == "coco_20i":
         import dataset.coco_20i
         return dataset.coco_20i
+    elif dataset_name == "coco_GIFS":
+        import dataset.coco_GIFS
+        return dataset.coco_GIFS
     else:
         raise NotImplementedError
