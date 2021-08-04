@@ -7,6 +7,7 @@ import torchvision
 from copy import deepcopy
 from torchvision import datasets, transforms
 from PIL import Image
+from pycocotools import mask as coco_mask
 from pycocotools.coco import COCO
 from .baseset import base_set
 
@@ -17,7 +18,6 @@ from IPython import embed
 #   sd: 0.2439, 0.2390, 0.2420
 
 class COCOSeg(datasets.vision.VisionDataset):
-    CLASS_NAMES_LIST = [] # TODO
     def __init__(self, root, train=True):
         super(COCOSeg, self).__init__(root, None, None, None)
         self.min_area = 0 # 200
@@ -41,6 +41,11 @@ class COCOSeg(datasets.vision.VisionDataset):
         # this class idx
         self.instance_class_map = self.init_class_map()
 
+        self.CLASS_NAMES_LIST = ['background']
+        for i in range(len(class_list)):
+            cls_name = self.coco.cats[class_list[i]]['name']
+            self.CLASS_NAMES_LIST.append(cls_name)
+
     def _get_img(self, img_id):
         img_desc = self.coco.imgs[img_id]
         img_fname = img_desc['file_name']
@@ -51,17 +56,22 @@ class COCOSeg(datasets.vision.VisionDataset):
         img_id = self.img_ids[idx]
         annotations = self.coco.imgToAnns[img_id]
         img = self._get_img(img_id)
-        seg_mask = torch.zeros((img.size[1], img.size[0]), dtype=torch.int64)
-        for ann in annotations:
-            real_class_id = self.class_map[ann['category_id']]
-            ann_mask = torch.from_numpy(self.coco.annToMask(ann))
-            # mask indicating invalid regions
-            if ann['iscrowd'] or ann['area'] < self.min_area:
-                seg_mask[ann_mask > 0] = -1
+        seg_mask = self._gen_seg_mask(annotations, img.size[1], img.size[0])
+        return (img, seg_mask)
+    
+    def _gen_seg_mask(self, inst_annotations, h, w):
+        # Note that this is different from implementation in those blogs from Google
+        # Reference: https://github.com/dmlc/gluon-cv/blob/master/gluoncv/data/mscoco/segmentation.py
+        mask = np.zeros((h, w), dtype=np.int64)
+        for instance in inst_annotations:
+            rle = coco_mask.frPyObjects(instance['segmentation'], h, w)
+            m = coco_mask.decode(rle)
+            real_class_id = self.class_map[instance['category_id']]
+            if len(m.shape) < 3:
+                mask[:, :] += (mask == 0) * (m * real_class_id)
             else:
-                assert real_class_id >= 0 and real_class_id <= 80
-                seg_mask = torch.max(seg_mask, ann_mask * real_class_id)
-        return (img, seg_mask.long())
+                mask[:, :] += (mask == 0) * (((np.sum(m, axis=2)) > 0) * real_class_id).astype(np.int64)
+        return torch.tensor(mask)
     
     def get_class_map(self, class_id):
         return deepcopy((self.instance_class_map[class_id]))
@@ -80,7 +90,7 @@ class COCOSeg(datasets.vision.VisionDataset):
             img_id = self.img_ids[i]
             annotations = self.coco.imgToAnns[img_id]
             for ann in annotations:
-                if ann['iscrowd']:
+                if ann['iscrowd'] or ann['area'] < self.min_area:
                     continue # crowded examples are excluded
                 real_class_id = self.class_map[ann['category_id']]
                 instances_class_map[real_class_id].add(i)
