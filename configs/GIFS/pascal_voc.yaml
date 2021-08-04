@@ -1,4 +1,4 @@
-name: 'pascal5i_deeplabv3_fold_3_bn_fake_novel_naive_resize_0.05'
+name: 'GIFS_pascal_voc'
 task: 'incremental_few_shot_segmentation'
 input_dim: (3, 512, 512)
 num_classes: 16
@@ -57,8 +57,14 @@ TRAIN:
     momentum: 0.9
     weight_decay: 1e-4
 
-META_TEST:
-  shot: 1
+TASK_SPECIFIC:
+  GIFS:
+    num_shots: 5
+    ft_batch_size: 5
+    backbone_lr: 1e-3
+    classifier_lr: 1e-3
+    feature_reg_lambda: 0.1
+    classifier_reg_lambda: 0.1
 
 TEST:
   batch_size: 1

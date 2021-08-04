@@ -149,6 +149,18 @@ _C.DATASET.TRANSFORM.TRAIN.TRANSFORMS_DETAILS.RANDOM_RESIZED_CROP.ratio = (0.75,
 # Duplicate transform for TEST
 _C.DATASET.TRANSFORM.TEST = _C.DATASET.TRANSFORM.TRAIN.clone()
 
+#######################
+# Task-specific Settings
+#######################
+_C.TASK_SPECIFIC = CN()
+_C.TASK_SPECIFIC.GIFS = CN()
+_C.TASK_SPECIFIC.GIFS.num_shots = 5
+_C.TASK_SPECIFIC.GIFS.ft_batch_size = 5
+_C.TASK_SPECIFIC.GIFS.backbone_lr = 1e-3
+_C.TASK_SPECIFIC.GIFS.classifier_lr = 1e-3
+_C.TASK_SPECIFIC.GIFS.feature_reg_lambda = 0.1
+_C.TASK_SPECIFIC.GIFS.classifier_reg_lambda = 0.1
+
 # ---------------------------
 # | End Default Config
 # ---------------------------
