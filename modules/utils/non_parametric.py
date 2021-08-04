@@ -26,3 +26,6 @@ def masked_average_pooling(mask_b1hw, feature_bchw, normalization):
 
     batch_pooled_vec = torch.sum(feature_bchw * mask_b1hw, dim = (2, 3)) / (mask_b1hw.sum(dim = (2, 3)) + 1e-5) # B x C
     return torch.mean(batch_pooled_vec, dim=0)
+
+def semantic_seg_CRF(pred_bhw):
+    raise NotImplementedError
