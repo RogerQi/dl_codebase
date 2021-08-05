@@ -20,6 +20,7 @@ import classifier
 import utils
 
 from .trainer_base import trainer_base
+from .seg_trainer import seg_trainer
 from dataset.special_loader import get_fs_seg_loader
 
 from IPython import embed
@@ -27,7 +28,7 @@ from IPython import embed
 def harmonic_mean(base_iou, novel_iou):
     return 2 / (1. / base_iou + 1. / novel_iou)
 
-class GIFS_seg_trainer(trainer_base):
+class GIFS_seg_trainer(seg_trainer):
     def __init__(self, cfg, backbone_net, post_processor, criterion, dataset_module, device):
         super(GIFS_seg_trainer, self).__init__(cfg, backbone_net, post_processor, criterion, dataset_module, device)
 
@@ -37,67 +38,8 @@ class GIFS_seg_trainer(trainer_base):
 
         self.continual_test_loader = torch.utils.data.DataLoader(self.continual_test_set, batch_size=cfg.TEST.batch_size, shuffle=False, **self.loader_kwargs)
 
-    def train_one(self, device, optimizer, epoch):
-        self.backbone_net.train()
-        self.post_processor.train()
-        start_cp = time.time()
-        train_total_loss = 0
-        for batch_idx, (data, target) in enumerate(self.train_loader):
-            optimizer.zero_grad() # reset gradient
-            data, target = data.to(device), target.to(device)
-            feature = self.backbone_net(data)
-            ori_spatial_res = data.shape[-2:]
-            output = self.post_processor(feature, ori_spatial_res)
-            loss = self.criterion(output, target)
-            loss.backward()
-            train_total_loss += loss.item()
-            optimizer.step()
-            if batch_idx % self.cfg.TRAIN.log_interval == 0:
-                pred_map = output.max(dim = 1)[1]
-                batch_acc, _ = utils.compute_pixel_acc(pred_map, target, fg_only=self.cfg.METRIC.SEGMENTATION.fg_only)
-                print('Train Epoch: {0} [{1}/{2} ({3:.0f}%)]\tLoss: {4:.6f}\tBatch Pixel Acc: {5:.6f} Epoch Elapsed Time: {6:.1f}'.format(
-                    epoch, batch_idx * len(data), len(self.train_set),
-                    100. * batch_idx / len(self.train_loader), loss.item(), batch_acc, time.time() - start_cp))
-        
-        return train_total_loss / len(self.train_loader)
-    
-    def val_one(self, device):
-        class_iou = self.eval_on_loader(self.backbone_netmodel, self.post_processor, self.val_loader, self.cfg.meta_training_num_classes)
-        print('\nTest set: Mean IoU {:.4f}'.format(np.mean(class_iou)))
-        return np.mean(class_iou)
-
-    def val_one(self, device):
-        self.backbone_net.eval()
-        self.post_processor.eval()
-        test_loss = 0
-        correct = 0
-        pixel_acc_list = []
-        iou_list = []
-        with torch.no_grad():
-            for data, target in self.val_loader:
-                data, target = data.to(device), target.to(device)
-                feature = self.backbone_net(data)
-                ori_spatial_res = data.shape[-2:]
-                output = self.post_processor(feature, ori_spatial_res)
-                test_loss += self.criterion(output, target).item()  # sum up batch loss
-                pred_map = output.max(dim = 1)[1]
-                batch_acc, _ = utils.compute_pixel_acc(pred_map, target, fg_only=self.cfg.METRIC.SEGMENTATION.fg_only)
-                pixel_acc_list.append(float(batch_acc))
-                for i in range(pred_map.shape[0]):
-                    iou = utils.compute_iou(
-                        np.array(pred_map[i].cpu()),
-                        np.array(target[i].cpu(), dtype=np.int64),
-                        self.cfg.meta_training_num_classes,
-                        fg_only=self.cfg.METRIC.SEGMENTATION.fg_only
-                    )
-                    iou_list.append(float(iou))
-
-            test_loss /= len(self.val_set)
-
-            m_iou = np.mean(iou_list)
-            print('\nTest set: Average loss: {:.4f}, Mean Pixel Accuracy: {:.4f}, Mean IoU {:.4f}'.format(
-                test_loss, np.mean(pixel_acc_list), m_iou))
-        return m_iou
+    # self.train_one is inherited from seg trainer
+    # self.val_one is inherited from seg trainer
     
     def live_run(self, device):
         self.backbone_net.eval()
@@ -178,7 +120,7 @@ class GIFS_seg_trainer(trainer_base):
         cap.release()
         cv2.destroyAllWindows()
 
-    def test_one(self, device, num_runs=1):
+    def test_one(self, device, num_runs=2):
         num_shots = self.cfg.TASK_SPECIFIC.GIFS.num_shots
         
         # Parse image candidates
@@ -238,51 +180,55 @@ class GIFS_seg_trainer(trainer_base):
         print("Harmonic IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_harm_iou_list), np.std(run_harm_iou_list)))
         print("Total IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_total_iou_list), np.std(run_total_iou_list)))
     
-    def classifier_weight_imprinting(self, support_set, num_classes):
+    def classifier_weight_imprinting(self, base_class_idx, novel_class_idx, supp_img_bchw, supp_mask_bhw):
+        assert self.prv_backbone_net is not None
+        assert self.prv_post_processor is not None
+        num_classes = len(base_class_idx) + len(novel_class_idx)
+        assert self.prv_post_processor.pixel_classifier.class_mat.weight.data.shape[0] == len(base_class_idx)
+
         ori_cnt = 0
         class_weight_vec_list = []
-        with torch.no_grad():
-            for c in range(num_classes):
-                if c in support_set:
-                    # Aggregate all candidates in support set
-                    image_list = []
-                    mask_list = []
-                    for n_c in support_set:
-                        for idx in support_set[n_c]:
-                            supp_img_chw, supp_mask_hw = self.continual_vanilla_train_set[idx]
-                            if c in supp_mask_hw:
-                                image_list.append(supp_img_chw)
-                                mask_list.append(supp_mask_hw)
-                    # novel class. Use MAP to initialize weight
-                    supp_img_bchw_tensor = torch.stack(image_list).cuda()
-                    supp_mask_bhw_tensor = torch.stack(mask_list).cuda()
-                    # Sanity check to make sure that there are at least some foreground pixels
-                    for b in range(supp_mask_bhw_tensor.shape[0]):
-                        assert c in supp_mask_bhw_tensor[b]
-                    with torch.no_grad():
-                        support_feature = self.backbone_net(supp_img_bchw_tensor)
-                        class_weight_vec = utils.masked_average_pooling(supp_mask_bhw_tensor == c, support_feature, True)
-                else:
-                    # base class. Copy weight from learned HEAD
-                    class_weight_vec = self.post_processor.pixel_classifier.class_mat.weight.data[ori_cnt]
-                    ori_cnt += 1
-                class_weight_vec = class_weight_vec.reshape((-1, 1, 1)) # C x 1 x 1
-                class_weight_vec_list.append(class_weight_vec)
+        for c in range(num_classes):
+            if c in novel_class_idx:
+                # Aggregate all candidates in support set
+                image_list = []
+                mask_list = []
+                for b in range(supp_img_bchw.shape[0]):
+                    if c in supp_mask_bhw[b]:
+                        image_list.append(supp_img_bchw[b])
+                        mask_list.append(supp_mask_bhw[b])
+                assert image_list, "no novel example found"
+                assert mask_list, "no novel example found"
+                # novel class. Use MAP to initialize weight
+                supp_img_bchw_tensor = torch.stack(image_list).cuda()
+                supp_mask_bhw_tensor = torch.stack(mask_list).cuda()
+                with torch.no_grad():
+                    support_feature = self.prv_backbone_net(supp_img_bchw_tensor)
+                    class_weight_vec = utils.masked_average_pooling(supp_mask_bhw_tensor == c, support_feature, True)
+            else:
+                # base class. Copy weight from learned HEAD
+                class_weight_vec = self.prv_post_processor.pixel_classifier.class_mat.weight.data[ori_cnt]
+                ori_cnt += 1
+            class_weight_vec = class_weight_vec.reshape((-1, 1, 1)) # C x 1 x 1
+            class_weight_vec_list.append(class_weight_vec)
         
         classifier_weights = torch.stack(class_weight_vec_list) # num_classes x C x 1 x 1
         return classifier_weights
     
-    def finetune_backbone(self, temp_backbone_net, temp_post_processor, img_idx_list, base_class_idx, novel_class_idx):
-        temp_backbone_net.train()
-        temp_post_processor.train()
+    def finetune_backbone(self, base_class_idx, novel_class_idx, supp_img_bchw, supp_mask_bhw):
+        assert self.prv_backbone_net is not None
+        assert self.prv_post_processor is not None
+
+        self.backbone_net.train()
+        self.post_processor.train()
 
         trainable_params = [
-            {"params": temp_backbone_net.parameters()},
-            {"params": temp_post_processor.parameters(), "lr": self.cfg.TASK_SPECIFIC.GIFS.classifier_lr}
+            {"params": self.backbone_net.parameters()},
+            {"params": self.post_processor.parameters(), "lr": self.cfg.TASK_SPECIFIC.GIFS.classifier_lr}
         ]
 
         # Freeze batch norm statistics
-        for module in temp_backbone_net.modules():
+        for module in self.backbone_net.modules():
             if isinstance(module, nn.BatchNorm2d) or isinstance(module, BatchRenorm2d):
                 if hasattr(module, 'weight'):
                     module.weight.requires_grad_(False)
@@ -303,12 +249,13 @@ class GIFS_seg_trainer(trainer_base):
 
         with trange(1, max_iter + 1, dynamic_ncols=True) as t:
             for iter_i in t:
-                shuffled_idx = torch.randperm(len(img_idx_list))[:batch_size]
+                shuffled_idx = torch.randperm(supp_img_bchw.shape[0])[:batch_size]
                 image_list = []
                 mask_list = []
                 for idx in shuffled_idx:
                     # Use augmented examples here.
-                    img_chw, mask_hw = self.continual_vanilla_train_set[img_idx_list[idx]]
+                    img_chw = supp_img_bchw[idx]
+                    mask_hw = supp_mask_bhw[idx]
                     if torch.rand(1) < 0.5:
                         img_chw = tr_F.hflip(img_chw)
                         mask_hw = tr_F.hflip(mask_hw)
@@ -316,17 +263,14 @@ class GIFS_seg_trainer(trainer_base):
                     mask_list.append(mask_hw)
                 data_bchw = torch.stack(image_list).cuda()
                 target_bhw = torch.stack(mask_list).cuda()
-                feature = temp_backbone_net(data_bchw)
+                feature = self.backbone_net(data_bchw)
                 ori_spatial_res = data_bchw.shape[-2:]
-                output = temp_post_processor(feature, ori_spatial_res, scale_factor=10)
+                output = self.post_processor(feature, ori_spatial_res, scale_factor=10)
 
                 # L2 regularization on feature extractor
                 with torch.no_grad():
-                    ori_feature = self.backbone_net(data_bchw)
-                    ori_logit = self.post_processor(ori_feature, ori_spatial_res, scale_factor=10)
-
-                # Pad index tensor
-                num_classes = output.shape[1]
+                    ori_feature = self.prv_backbone_net(data_bchw)
+                    ori_logit = self.prv_post_processor(ori_feature, ori_spatial_res, scale_factor=10)
 
                 novel_mask = torch.zeros_like(target_bhw)
                 for novel_idx in novel_class_idx:
@@ -352,92 +296,54 @@ class GIFS_seg_trainer(trainer_base):
                 optimizer.step()
                 scheduler.step()
                 t.set_description_str("Loss: {:.4f}".format(loss.item()))
-
-        return temp_backbone_net, temp_post_processor
     
     def continual_test_single_pass(self, support_set):
-        temp_backbone_net = deepcopy(self.backbone_net)
+        self.prv_backbone_net = deepcopy(self.backbone_net)
+        self.prv_post_processor = deepcopy(self.post_processor)
         
+        self.prv_backbone_net.eval()
+        self.prv_post_processor.eval()
         self.backbone_net.eval()
         self.post_processor.eval()
-        temp_backbone_net.eval()
 
-        n_base_classes = self.post_processor.pixel_classifier.class_mat.weight.data.shape[0]
+        n_base_classes = self.prv_post_processor.pixel_classifier.class_mat.weight.data.shape[0]
         n_novel_classes = len(support_set.keys())
         num_classes = n_base_classes + n_novel_classes
 
         novel_class_idx = sorted(list(support_set.keys()))
         base_class_idx = [i for i in range(num_classes) if i not in novel_class_idx]
 
-        temp_post_processor = classifier.dispatcher(self.cfg, self.feature_shape, num_classes=num_classes)
-        temp_post_processor = temp_post_processor.to(self.device)
-
-        # Aggregate weights
-        temp_post_processor.pixel_classifier.class_mat.weight.data = self.classifier_weight_imprinting(support_set, num_classes)
-
         # Aggregate elements in support set
-        img_idx_list = []
+        image_list = []
+        mask_list = []
+
         for c in support_set:
-            img_idx_list += support_set[c]
+            for idx in support_set[c]:
+                img_chw, mask_hw = self.continual_vanilla_train_set[idx]
+                image_list.append(img_chw)
+                mask_list.append(mask_hw)
+        supp_img_bchw = torch.stack(image_list)
+        supp_mask_bhw = torch.stack(mask_list)
+
+        self.novel_adapt(base_class_idx, novel_class_idx, supp_img_bchw, supp_mask_bhw)
+
+        # Evaluation
+        metric = self.eval_on_loader(self.continual_test_loader, num_classes)
+
+        # Restore weights
+        self.backbone_net = self.prv_backbone_net
+        self.post_processor = self.prv_post_processor
+
+        return metric
+    
+    def novel_adapt(self, base_class_idx, novel_class_idx, supp_img_bchw, supp_mask_bhw):
+        num_classes = len(base_class_idx) + len(novel_class_idx)
+        self.post_processor = classifier.dispatcher(self.cfg, self.feature_shape, num_classes=num_classes)
+        self.post_processor = self.post_processor.to(self.device)
+        # Aggregate weights
+        aggregated_weights = self.classifier_weight_imprinting(base_class_idx, novel_class_idx, supp_img_bchw, supp_mask_bhw)
+        self.post_processor.pixel_classifier.class_mat.weight.data = aggregated_weights
 
         # Optimization over support set to fine-tune initialized vectors
         if self.cfg.TASK_SPECIFIC.GIFS.fine_tuning:
-            self.finetune_backbone(temp_backbone_net, temp_post_processor, img_idx_list, base_class_idx, novel_class_idx)
-
-        temp_backbone_net.eval()
-        temp_post_processor.eval()
-        # Evaluation
-        metric = self.eval_on_loader(temp_backbone_net, temp_post_processor, self.continual_test_loader, num_classes)
-
-        return metric
-
-    def eval_on_loader(self, model, post_processor, test_loader, num_classes, visfreq=99999999):
-        model.eval()
-        post_processor.eval()
-        test_loss = 0
-        correct = 0
-        pixel_acc_list = []
-        class_intersection, class_union = (None, None)
-        class_names_list = test_loader.dataset.dataset.CLASS_NAMES_LIST
-        with torch.no_grad():
-            for idx, (data, target) in enumerate(test_loader):
-                data, target = data.to(self.device), target.to(self.device)
-                feature = model(data)
-                ori_spatial_res = data.shape[-2:]
-                output = post_processor(feature, ori_spatial_res)
-                test_loss += self.criterion(output, target).item()  # sum up batch loss
-                pred_map = output.max(dim = 1)[1]
-                batch_acc, _ = utils.compute_pixel_acc(pred_map, target, fg_only=self.cfg.METRIC.SEGMENTATION.fg_only)
-                pixel_acc_list.append(float(batch_acc))
-                for i in range(pred_map.shape[0]):
-                    pred_np = np.array(pred_map[i].cpu())
-                    target_np = np.array(target[i].cpu(), dtype=np.int64)
-                    intersection, union = utils.compute_iu(pred_np, target_np, num_classes)
-                    if class_intersection is None:
-                        class_intersection = intersection
-                        class_union = union
-                    else:
-                        class_intersection += intersection
-                        class_union += union
-                    if (idx + 1) % visfreq == 0:
-                        gt_label = utils.visualize_segmentation(self.cfg, data[i], target_np, class_names_list)
-                        predicted_label = utils.visualize_segmentation(self.cfg, data[i], pred_np, class_names_list)
-                        cv2.imwrite("{}_{}_pred.png".format(idx, i), predicted_label)
-                        cv2.imwrite("{}_{}_label.png".format(idx, i), gt_label)
-                        # Visualize RGB image as well
-                        ori_rgb_np = np.array(data[i].permute((1, 2, 0)).cpu())
-                        if 'normalize' in self.cfg.DATASET.TRANSFORM.TEST.transforms:
-                            rgb_mean = self.cfg.DATASET.TRANSFORM.TEST.TRANSFORMS_DETAILS.NORMALIZE.mean
-                            rgb_sd = self.cfg.DATASET.TRANSFORM.TEST.TRANSFORMS_DETAILS.NORMALIZE.sd
-                            ori_rgb_np = (ori_rgb_np * rgb_sd) + rgb_mean
-                        assert ori_rgb_np.max() <= 1.1, "Max is {}".format(ori_rgb_np.max())
-                        ori_rgb_np[ori_rgb_np >= 1] = 1
-                        ori_rgb_np = (ori_rgb_np * 255).astype(np.uint8)
-                        # Convert to OpenCV BGR
-                        ori_rgb_np = cv2.cvtColor(ori_rgb_np, cv2.COLOR_RGB2BGR)
-                        cv2.imwrite("{}_{}_ori.jpg".format(idx, i), ori_rgb_np)
-
-        test_loss /= len(test_loader.dataset)
-
-        class_iou = class_intersection / (class_union + 1e-10)
-        return class_iou
+            self.finetune_backbone(base_class_idx, novel_class_idx, supp_img_bchw, supp_mask_bhw)
