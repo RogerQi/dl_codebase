@@ -153,8 +153,14 @@ _C.DATASET.TRANSFORM.TEST = _C.DATASET.TRANSFORM.TRAIN.clone()
 # Task-specific Settings
 #######################
 _C.TASK_SPECIFIC = CN()
+
+#######################
+# GIFS Reproduction: https://arxiv.org/pdf/2012.01415.pdf
+#######################
 _C.TASK_SPECIFIC.GIFS = CN()
 _C.TASK_SPECIFIC.GIFS.num_shots = 5
+_C.TASK_SPECIFIC.GIFS.fine_tuning = True
+_C.TASK_SPECIFIC.GIFS.pseudo_base_label = False
 _C.TASK_SPECIFIC.GIFS.ft_batch_size = 5
 _C.TASK_SPECIFIC.GIFS.backbone_lr = 1e-3
 _C.TASK_SPECIFIC.GIFS.classifier_lr = 1e-3

@@ -60,6 +60,11 @@ class GIFS_seg_trainer(trainer_base):
                     100. * batch_idx / len(self.train_loader), loss.item(), batch_acc, time.time() - start_cp))
         
         return train_total_loss / len(self.train_loader)
+    
+    def val_one(self, device):
+        class_iou = self.eval_on_loader(self.backbone_netmodel, self.post_processor, self.val_loader, self.cfg.meta_training_num_classes)
+        print('\nTest set: Mean IoU {:.4f}'.format(np.mean(class_iou)))
+        return np.mean(class_iou)
 
     def val_one(self, device):
         self.backbone_net.eval()
@@ -173,8 +178,7 @@ class GIFS_seg_trainer(trainer_base):
         cap.release()
         cv2.destroyAllWindows()
 
-    def test_one(self, device, visfreq=99999999999, num_runs=5, ft_backbone=True, feature_reg=True, soft_label_reg=False, pseudo_label_only=False):
-        assert not (pseudo_label_only and soft_label_reg)
+    def test_one(self, device, num_runs=1):
         num_shots = self.cfg.TASK_SPECIFIC.GIFS.num_shots
         
         # Parse image candidates
@@ -184,6 +188,7 @@ class GIFS_seg_trainer(trainer_base):
         for l in testing_label_candidates:
             vanilla_image_candidates[l] = set(self.continual_vanilla_train_set.dataset.get_class_map(l))
         
+        # To ensure only $num_shots$ number of examples are used
         image_candidates = {}
         for k_i in vanilla_image_candidates:
             image_candidates[k_i] = deepcopy(vanilla_image_candidates[k_i])
@@ -211,7 +216,7 @@ class GIFS_seg_trainer(trainer_base):
                 selected_idx = np.random.choice(image_candidates[k], size=(num_shots, ), replace=False)
                 support_set[k] = list(selected_idx)
         
-            classwise_iou = self.continual_test_single_pass(support_set, ft_backbone, feature_reg, soft_label_reg, pseudo_label_only, visfreq)
+            classwise_iou = self.continual_test_single_pass(support_set)
             novel_iou_list = []
             base_iou_list = []
             for i in range(len(classwise_iou)):
@@ -267,7 +272,7 @@ class GIFS_seg_trainer(trainer_base):
         classifier_weights = torch.stack(class_weight_vec_list) # num_classes x C x 1 x 1
         return classifier_weights
     
-    def finetune_backbone(self, temp_backbone_net, temp_post_processor, img_idx_list, feature_reg, soft_label_reg, pseudo_label_only, base_class_idx, novel_class_idx):
+    def finetune_backbone(self, temp_backbone_net, temp_post_processor, img_idx_list, base_class_idx, novel_class_idx):
         temp_backbone_net.train()
         temp_post_processor.train()
 
@@ -275,7 +280,7 @@ class GIFS_seg_trainer(trainer_base):
             {"params": temp_backbone_net.parameters()},
             {"params": temp_post_processor.parameters(), "lr": self.cfg.TASK_SPECIFIC.GIFS.classifier_lr}
         ]
-        cnt = 0
+
         # Freeze batch norm statistics
         for module in temp_backbone_net.modules():
             if isinstance(module, nn.BatchNorm2d) or isinstance(module, BatchRenorm2d):
@@ -284,8 +289,6 @@ class GIFS_seg_trainer(trainer_base):
                 if hasattr(module, 'bias'):
                     module.bias.requires_grad_(False)
                 module.eval()
-                cnt += 1
-        print("Number of batchnorm module frozen: {}".format(cnt))
 
         optimizer = optim.SGD(trainable_params, lr = self.cfg.TASK_SPECIFIC.GIFS.backbone_lr, momentum = 0.9)
         
@@ -297,8 +300,6 @@ class GIFS_seg_trainer(trainer_base):
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, polynomial_schedule)
 
         l2_criterion = nn.MSELoss()
-
-        loss_arr = []
 
         with trange(1, max_iter + 1, dynamic_ncols=True) as t:
             for iter_i in t:
@@ -322,7 +323,6 @@ class GIFS_seg_trainer(trainer_base):
                 # L2 regularization on feature extractor
                 with torch.no_grad():
                     ori_feature = self.backbone_net(data_bchw)
-                with torch.no_grad():
                     ori_logit = self.post_processor(ori_feature, ori_spatial_res, scale_factor=10)
 
                 # Pad index tensor
@@ -332,45 +332,35 @@ class GIFS_seg_trainer(trainer_base):
                 for novel_idx in novel_class_idx:
                     novel_mask = torch.logical_or(novel_mask, target_bhw == novel_idx)
 
-                if pseudo_label_only:
+                if self.cfg.TASK_SPECIFIC.GIFS.pseudo_base_label:
                     tmp_target_bhw = output.max(dim = 1)[1]
                     tmp_target_bhw[novel_mask] = target_bhw[novel_mask]
                     target_bhw = tmp_target_bhw
-                    # target_bhwc[:,:,:,base_class_idx] = F.softmax(ori_logit.permute((0, 2, 3, 1)), dim=3)
-                    # target_bhwc[novel_mask][base_class_idx] = 0
 
-                if True:
-                    # loss = my_ce_loss(output, target_bchw)
-                    loss = self.criterion(output, target_bhw)
-                else:
-                    pred_bchw = F.log_softmax(output, dim=1)
-                    loss = F.kl_div(pred_bchw, target_bchw, reduction='mean', log_target=True)
+                loss = self.criterion(output, target_bhw)
 
-                if feature_reg:
-                    regularization_loss = l2_criterion(feature, ori_feature)
-                    regularization_loss = regularization_loss * self.cfg.TASK_SPECIFIC.GIFS.feature_reg_lambda # hyperparameter lambda
-                    loss = loss + regularization_loss
-                if soft_label_reg:
-                    # L2 regulalrization on base classes
-                    clf_loss = l2_criterion(output[:,base_class_idx,:,:], ori_logit) * self.cfg.TASK_SPECIFIC.GIFS.classifier_reg_lambda
-                    loss = loss + clf_loss
+                # Feature extractor regularization + classifier regularization
+                regularization_loss = l2_criterion(feature, ori_feature)
+                regularization_loss = regularization_loss * self.cfg.TASK_SPECIFIC.GIFS.feature_reg_lambda # hyperparameter lambda
+                loss = loss + regularization_loss
+                # L2 regulalrization on base classes
+                clf_loss = l2_criterion(output[:,base_class_idx,:,:], ori_logit) * self.cfg.TASK_SPECIFIC.GIFS.classifier_reg_lambda
+                loss = loss + clf_loss
+
                 optimizer.zero_grad() # reset gradient
                 loss.backward()
                 optimizer.step()
                 scheduler.step()
                 t.set_description_str("Loss: {:.4f}".format(loss.item()))
-                loss_arr.append(loss.item())
 
         return temp_backbone_net, temp_post_processor
     
-    def continual_test_single_pass(self, support_set, ft_backbone, feature_reg, soft_label_reg, pseudo_label_only, visfreq):
+    def continual_test_single_pass(self, support_set):
         temp_backbone_net = deepcopy(self.backbone_net)
         
         self.backbone_net.eval()
         self.post_processor.eval()
         temp_backbone_net.eval()
-
-        class_names_list = self.continual_vanilla_train_set.dataset.CLASS_NAMES_LIST
 
         n_base_classes = self.post_processor.pixel_classifier.class_mat.weight.data.shape[0]
         n_novel_classes = len(support_set.keys())
@@ -391,66 +381,63 @@ class GIFS_seg_trainer(trainer_base):
             img_idx_list += support_set[c]
 
         # Optimization over support set to fine-tune initialized vectors
-        if ft_backbone:
-            temp_backbone_net, temp_post_processor = self.finetune_backbone(temp_backbone_net, temp_post_processor, img_idx_list, feature_reg, soft_label_reg, pseudo_label_only, base_class_idx, novel_class_idx)
+        if self.cfg.TASK_SPECIFIC.GIFS.fine_tuning:
+            self.finetune_backbone(temp_backbone_net, temp_post_processor, img_idx_list, base_class_idx, novel_class_idx)
 
         temp_backbone_net.eval()
         temp_post_processor.eval()
         # Evaluation
-        metric = test(self.cfg, temp_backbone_net, temp_post_processor, self.criterion, self.device, self.continual_test_loader, class_names_list, num_classes, visfreq)
+        metric = self.eval_on_loader(temp_backbone_net, temp_post_processor, self.continual_test_loader, num_classes)
 
         return metric
 
-def test(cfg, model, post_processor, criterion, device, test_loader, class_names_list, num_classes, visfreq):
-    model.eval()
-    post_processor.eval()
-    test_loss = 0
-    correct = 0
-    pixel_acc_list = []
-    class_intersection, class_union = (None, None)
-    with torch.no_grad():
-        for idx, (data, target) in enumerate(test_loader):
-            data, target = data.to(device), target.to(device)
-            feature = model(data)
-            ori_spatial_res = data.shape[-2:]
-            output = post_processor(feature, ori_spatial_res)
-            test_loss += criterion(output, target).item()  # sum up batch loss
-            pred_map = output.max(dim = 1)[1]
-            batch_acc, _ = utils.compute_pixel_acc(pred_map, target, fg_only=cfg.METRIC.SEGMENTATION.fg_only)
-            pixel_acc_list.append(float(batch_acc))
-            for i in range(pred_map.shape[0]):
-                pred_np = np.array(pred_map[i].cpu())
-                target_np = np.array(target[i].cpu(), dtype=np.int64)
-                intersection, union = utils.compute_iu(pred_np, target_np, num_classes)
-                if class_intersection is None:
-                    class_intersection = intersection
-                    class_union = union
-                else:
-                    class_intersection += intersection
-                    class_union += union
-                if (idx + 1) % visfreq == 0:
-                    gt_label = utils.visualize_segmentation(cfg, data[i], target_np, class_names_list)
-                    predicted_label = utils.visualize_segmentation(cfg, data[i], pred_np, class_names_list)
-                    cv2.imwrite("{}_{}_pred.png".format(idx, i), predicted_label)
-                    cv2.imwrite("{}_{}_label.png".format(idx, i), gt_label)
-                    # Visualize RGB image as well
-                    ori_rgb_np = np.array(data[i].permute((1, 2, 0)).cpu())
-                    if 'normalize' in cfg.DATASET.TRANSFORM.TEST.transforms:
-                        rgb_mean = cfg.DATASET.TRANSFORM.TEST.TRANSFORMS_DETAILS.NORMALIZE.mean
-                        rgb_sd = cfg.DATASET.TRANSFORM.TEST.TRANSFORMS_DETAILS.NORMALIZE.sd
-                        ori_rgb_np = (ori_rgb_np * rgb_sd) + rgb_mean
-                    assert ori_rgb_np.max() <= 1.1, "Max is {}".format(ori_rgb_np.max())
-                    ori_rgb_np[ori_rgb_np >= 1] = 1
-                    ori_rgb_np = (ori_rgb_np * 255).astype(np.uint8)
-                    # Convert to OpenCV BGR
-                    ori_rgb_np = cv2.cvtColor(ori_rgb_np, cv2.COLOR_RGB2BGR)
-                    cv2.imwrite("{}_{}_ori.jpg".format(idx, i), ori_rgb_np)
+    def eval_on_loader(self, model, post_processor, test_loader, num_classes, visfreq=99999999):
+        model.eval()
+        post_processor.eval()
+        test_loss = 0
+        correct = 0
+        pixel_acc_list = []
+        class_intersection, class_union = (None, None)
+        class_names_list = test_loader.dataset.dataset.CLASS_NAMES_LIST
+        with torch.no_grad():
+            for idx, (data, target) in enumerate(test_loader):
+                data, target = data.to(self.device), target.to(self.device)
+                feature = model(data)
+                ori_spatial_res = data.shape[-2:]
+                output = post_processor(feature, ori_spatial_res)
+                test_loss += self.criterion(output, target).item()  # sum up batch loss
+                pred_map = output.max(dim = 1)[1]
+                batch_acc, _ = utils.compute_pixel_acc(pred_map, target, fg_only=self.cfg.METRIC.SEGMENTATION.fg_only)
+                pixel_acc_list.append(float(batch_acc))
+                for i in range(pred_map.shape[0]):
+                    pred_np = np.array(pred_map[i].cpu())
+                    target_np = np.array(target[i].cpu(), dtype=np.int64)
+                    intersection, union = utils.compute_iu(pred_np, target_np, num_classes)
+                    if class_intersection is None:
+                        class_intersection = intersection
+                        class_union = union
+                    else:
+                        class_intersection += intersection
+                        class_union += union
+                    if (idx + 1) % visfreq == 0:
+                        gt_label = utils.visualize_segmentation(self.cfg, data[i], target_np, class_names_list)
+                        predicted_label = utils.visualize_segmentation(self.cfg, data[i], pred_np, class_names_list)
+                        cv2.imwrite("{}_{}_pred.png".format(idx, i), predicted_label)
+                        cv2.imwrite("{}_{}_label.png".format(idx, i), gt_label)
+                        # Visualize RGB image as well
+                        ori_rgb_np = np.array(data[i].permute((1, 2, 0)).cpu())
+                        if 'normalize' in self.cfg.DATASET.TRANSFORM.TEST.transforms:
+                            rgb_mean = self.cfg.DATASET.TRANSFORM.TEST.TRANSFORMS_DETAILS.NORMALIZE.mean
+                            rgb_sd = self.cfg.DATASET.TRANSFORM.TEST.TRANSFORMS_DETAILS.NORMALIZE.sd
+                            ori_rgb_np = (ori_rgb_np * rgb_sd) + rgb_mean
+                        assert ori_rgb_np.max() <= 1.1, "Max is {}".format(ori_rgb_np.max())
+                        ori_rgb_np[ori_rgb_np >= 1] = 1
+                        ori_rgb_np = (ori_rgb_np * 255).astype(np.uint8)
+                        # Convert to OpenCV BGR
+                        ori_rgb_np = cv2.cvtColor(ori_rgb_np, cv2.COLOR_RGB2BGR)
+                        cv2.imwrite("{}_{}_ori.jpg".format(idx, i), ori_rgb_np)
 
-    test_loss /= len(test_loader.dataset)
+        test_loss /= len(test_loader.dataset)
 
-    # print("Intersection:")
-    # print(class_intersection)
-    # print("Union:")
-    # print(class_union)
-    class_iou = class_intersection / (class_union + 1e-10)
-    return class_iou
+        class_iou = class_intersection / (class_union + 1e-10)
+        return class_iou
