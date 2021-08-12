@@ -120,7 +120,7 @@ class GIFS_seg_trainer(seg_trainer):
         cap.release()
         cv2.destroyAllWindows()
 
-    def test_one(self, device, num_runs=2):
+    def test_one(self, device, num_runs=5):
         num_shots = self.cfg.TASK_SPECIFIC.GIFS.num_shots
         
         # Parse image candidates
@@ -183,12 +183,12 @@ class GIFS_seg_trainer(seg_trainer):
     def classifier_weight_imprinting(self, base_class_idx, novel_class_idx, supp_img_bchw, supp_mask_bhw):
         assert self.prv_backbone_net is not None
         assert self.prv_post_processor is not None
-        num_classes = len(base_class_idx) + len(novel_class_idx)
+        max_cls = max(max(base_class_idx), max(novel_class_idx)) + 1
         assert self.prv_post_processor.pixel_classifier.class_mat.weight.data.shape[0] == len(base_class_idx)
 
         ori_cnt = 0
         class_weight_vec_list = []
-        for c in range(num_classes):
+        for c in range(max_cls):
             if c in novel_class_idx:
                 # Aggregate all candidates in support set
                 image_list = []
@@ -205,15 +205,30 @@ class GIFS_seg_trainer(seg_trainer):
                 with torch.no_grad():
                     support_feature = self.prv_backbone_net(supp_img_bchw_tensor)
                     class_weight_vec = utils.masked_average_pooling(supp_mask_bhw_tensor == c, support_feature, True)
-            else:
+            elif c in base_class_idx:
                 # base class. Copy weight from learned HEAD
                 class_weight_vec = self.prv_post_processor.pixel_classifier.class_mat.weight.data[ori_cnt]
                 ori_cnt += 1
+            else:
+                # not used class
+                class_weight_vec = torch.zeros_like(self.prv_post_processor.pixel_classifier.class_mat.weight.data[0])
             class_weight_vec = class_weight_vec.reshape((-1, 1, 1)) # C x 1 x 1
             class_weight_vec_list.append(class_weight_vec)
         
         classifier_weights = torch.stack(class_weight_vec_list) # num_classes x C x 1 x 1
         return classifier_weights
+    
+    def synthesizer(self, novel_img_chw, novel_mask_hw, novel_obj_id):
+        # TODO: use random affine transformation for better result
+        base_img_idx = np.random.randint(0, len(self.train_set))
+        base_img_chw, base_mask_hw = self.train_set[base_img_idx]
+        # utils.generalized_imshow(self.cfg, base_img_chw)
+        base_img_chw[:,novel_mask_hw] = novel_img_chw[:,novel_mask_hw]
+        base_mask_hw[novel_mask_hw] = novel_obj_id
+        img_chw = base_img_chw
+        mask_hw = base_mask_hw
+
+        return (img_chw, mask_hw)
     
     def finetune_backbone(self, base_class_idx, novel_class_idx, supp_img_bchw, supp_mask_bhw):
         assert self.prv_backbone_net is not None
@@ -256,9 +271,18 @@ class GIFS_seg_trainer(seg_trainer):
                     # Use augmented examples here.
                     img_chw = supp_img_bchw[idx]
                     mask_hw = supp_mask_bhw[idx]
-                    if torch.rand(1) < 0.5:
-                        img_chw = tr_F.hflip(img_chw)
-                        mask_hw = tr_F.hflip(mask_hw)
+                    if False:
+                        if torch.rand(1) < 0.5:
+                            img_chw = tr_F.hflip(img_chw)
+                            mask_hw = tr_F.hflip(mask_hw)
+                    else:
+                        all_novel_obj = []
+                        for c in novel_class_idx:
+                            if c in mask_hw:
+                                all_novel_obj.append(c)
+                        assert len(all_novel_obj) == 1
+                        novel_mask = (mask_hw == all_novel_obj[0])
+                        img_chw, mask_hw = self.synthesizer(img_chw, novel_mask, all_novel_obj[0])
                     image_list.append(img_chw)
                     mask_list.append(mask_hw)
                 data_bchw = torch.stack(image_list).cuda()
@@ -272,11 +296,10 @@ class GIFS_seg_trainer(seg_trainer):
                     ori_feature = self.prv_backbone_net(data_bchw)
                     ori_logit = self.prv_post_processor(ori_feature, ori_spatial_res, scale_factor=10)
 
-                novel_mask = torch.zeros_like(target_bhw)
-                for novel_idx in novel_class_idx:
-                    novel_mask = torch.logical_or(novel_mask, target_bhw == novel_idx)
-
                 if self.cfg.TASK_SPECIFIC.GIFS.pseudo_base_label:
+                    novel_mask = torch.zeros_like(target_bhw)
+                    for novel_idx in novel_class_idx:
+                        novel_mask = torch.logical_or(novel_mask, target_bhw == novel_idx)
                     tmp_target_bhw = output.max(dim = 1)[1]
                     tmp_target_bhw[novel_mask] = target_bhw[novel_mask]
                     target_bhw = tmp_target_bhw
@@ -337,8 +360,8 @@ class GIFS_seg_trainer(seg_trainer):
         return metric
     
     def novel_adapt(self, base_class_idx, novel_class_idx, supp_img_bchw, supp_mask_bhw):
-        num_classes = len(base_class_idx) + len(novel_class_idx)
-        self.post_processor = classifier.dispatcher(self.cfg, self.feature_shape, num_classes=num_classes)
+        max_cls = max(max(base_class_idx), max(novel_class_idx)) + 1
+        self.post_processor = classifier.dispatcher(self.cfg, self.feature_shape, num_classes=max_cls)
         self.post_processor = self.post_processor.to(self.device)
         # Aggregate weights
         aggregated_weights = self.classifier_weight_imprinting(base_class_idx, novel_class_idx, supp_img_bchw, supp_mask_bhw)
