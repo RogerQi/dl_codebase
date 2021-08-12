@@ -70,6 +70,7 @@ _C.TRAIN.log_interval = 10
 _C.TRAIN.batch_size = 64
 _C.TRAIN.initial_lr = 0.01
 _C.TRAIN.lr_scheduler = 'none'
+_C.TRAIN.lr_max_epoch = -1
 _C.TRAIN.step_down_gamma = 0.1
 _C.TRAIN.step_down_on_epoch = []
 _C.TRAIN.max_epochs = 100

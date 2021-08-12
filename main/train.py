@@ -104,11 +104,15 @@ def main():
         raise NotImplementedError("Got unsupported optimizer: {}".format(cfg.TRAIN.OPTIMIZER.type))
 
     # Prepare LR scheduler
+    if cfg.TRAIN.lr_max_epoch != -1:
+        max_epoch = cfg.TRAIN.lr_max_epoch
+    else:
+        max_epoch = cfg.TRAIN.max_epochs
+
     if cfg.TRAIN.lr_scheduler == "step_down":
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones = cfg.TRAIN.step_down_on_epoch,
                                                             gamma = cfg.TRAIN.step_down_gamma)
     elif cfg.TRAIN.lr_scheduler == "polynomial":
-        max_epoch = cfg.TRAIN.max_epochs
         def polynomial_schedule(epoch):
             # from https://arxiv.org/pdf/2012.01415.pdf
             return (1 - epoch / max_epoch)**0.9

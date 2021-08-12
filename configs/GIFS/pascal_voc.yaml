@@ -45,7 +45,8 @@ DATASET:
         crop_size: (512, 512)
 
 TRAIN:
-  max_epochs: 30
+  max_epochs: 10
+  lr_max_epoch: 30
   batch_size: 8 # 24
   initial_lr: 0.007
   lr_scheduler: "step_down"
@@ -59,12 +60,14 @@ TRAIN:
 
 TASK_SPECIFIC:
   GIFS:
+    fine_tuning: True
+    pseudo_base_label: False
     num_shots: 5
     ft_batch_size: 5
     backbone_lr: 1e-3
     classifier_lr: 1e-3
     feature_reg_lambda: 0.1
-    classifier_reg_lambda: 0.1
+    classifier_reg_lambda: 0.0
 
 TEST:
   batch_size: 1
