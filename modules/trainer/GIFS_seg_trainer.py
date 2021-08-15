@@ -218,18 +218,6 @@ class GIFS_seg_trainer(seg_trainer):
         classifier_weights = torch.stack(class_weight_vec_list) # num_classes x C x 1 x 1
         return classifier_weights
     
-    def synthesizer(self, novel_img_chw, novel_mask_hw, novel_obj_id):
-        # TODO: use random affine transformation for better result
-        base_img_idx = np.random.randint(0, len(self.train_set))
-        base_img_chw, base_mask_hw = self.train_set[base_img_idx]
-        # utils.generalized_imshow(self.cfg, base_img_chw)
-        base_img_chw[:,novel_mask_hw] = novel_img_chw[:,novel_mask_hw]
-        base_mask_hw[novel_mask_hw] = novel_obj_id
-        img_chw = base_img_chw
-        mask_hw = base_mask_hw
-
-        return (img_chw, mask_hw)
-    
     def finetune_backbone(self, base_class_idx, novel_class_idx, supp_img_bchw, supp_mask_bhw):
         assert self.prv_backbone_net is not None
         assert self.prv_post_processor is not None
@@ -253,7 +241,7 @@ class GIFS_seg_trainer(seg_trainer):
 
         optimizer = optim.SGD(trainable_params, lr = self.cfg.TASK_SPECIFIC.GIFS.backbone_lr, momentum = 0.9)
         
-        max_iter = 1000
+        max_iter = self.cfg.TASK_SPECIFIC.GIFS.max_iter
         def polynomial_schedule(epoch):
             return (1 - epoch / max_iter)**0.9
         batch_size = self.cfg.TASK_SPECIFIC.GIFS.ft_batch_size
@@ -271,18 +259,9 @@ class GIFS_seg_trainer(seg_trainer):
                     # Use augmented examples here.
                     img_chw = supp_img_bchw[idx]
                     mask_hw = supp_mask_bhw[idx]
-                    if False:
-                        if torch.rand(1) < 0.5:
-                            img_chw = tr_F.hflip(img_chw)
-                            mask_hw = tr_F.hflip(mask_hw)
-                    else:
-                        all_novel_obj = []
-                        for c in novel_class_idx:
-                            if c in mask_hw:
-                                all_novel_obj.append(c)
-                        assert len(all_novel_obj) == 1
-                        novel_mask = (mask_hw == all_novel_obj[0])
-                        img_chw, mask_hw = self.synthesizer(img_chw, novel_mask, all_novel_obj[0])
+                    if torch.rand(1) < 0.5:
+                        img_chw = tr_F.hflip(img_chw)
+                        mask_hw = tr_F.hflip(mask_hw)
                     image_list.append(img_chw)
                     mask_list.append(mask_hw)
                 data_bchw = torch.stack(image_list).cuda()

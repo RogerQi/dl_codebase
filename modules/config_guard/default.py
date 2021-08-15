@@ -163,6 +163,7 @@ _C.TASK_SPECIFIC.GIFS.num_shots = 5
 _C.TASK_SPECIFIC.GIFS.fine_tuning = True
 _C.TASK_SPECIFIC.GIFS.pseudo_base_label = False
 _C.TASK_SPECIFIC.GIFS.ft_batch_size = 5
+_C.TASK_SPECIFIC.GIFS.max_iter = 1000
 _C.TASK_SPECIFIC.GIFS.backbone_lr = 1e-3
 _C.TASK_SPECIFIC.GIFS.classifier_lr = 1e-3
 _C.TASK_SPECIFIC.GIFS.feature_reg_lambda = 0.1

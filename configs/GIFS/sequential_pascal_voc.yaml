@@ -1,5 +1,5 @@
 name: 'GIFS_pascal_voc'
-task: '"sequential_incremental_few_shot_segmentation"'
+task: 'sequential_GIFS'
 input_dim: (3, 512, 512)
 num_classes: 16
 meta_training_num_classes: 16 # (15 annotated class in splitted training set + 1 background)
@@ -62,6 +62,7 @@ TASK_SPECIFIC:
   GIFS:
     fine_tuning: True
     pseudo_base_label: False
+    max_iter: 200
     num_shots: 5
     ft_batch_size: 5
     backbone_lr: 1e-3
