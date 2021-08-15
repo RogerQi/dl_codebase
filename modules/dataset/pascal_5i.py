@@ -2,17 +2,14 @@
 Module containing reader to parse pascal_5i dataset from SBD and VOC2012
 """
 import os
-import random
-from PIL import Image
-from scipy.io import loadmat
 from copy import deepcopy
-import numpy as np
 import torch
 import torchvision
+
+import utils
 from .baseset import base_set
 from .voc2012_seg import PascalVOCSegReader
 
-from IPython import embed
 
 class Pascal5iReader(torchvision.datasets.vision.VisionDataset):
     def __init__(self, root, fold, base_stage, split, exclude_novel=False):
@@ -174,34 +171,34 @@ class PartialPascalReader(torchvision.datasets.vision.VisionDataset):
 
 def get_train_set(cfg):
     folding = cfg.DATASET.PASCAL5i.folding
-    ds = Pascal5iReader('/data', folding, True, True, exclude_novel=True)
+    ds = Pascal5iReader(utils.get_dataset_root(), folding, True, True, exclude_novel=True)
     return base_set(ds, "train", cfg)
 
 def get_val_set(cfg):
     folding = cfg.DATASET.PASCAL5i.folding
-    ds = Pascal5iReader('/data', folding, True, False, exclude_novel=False)
+    ds = Pascal5iReader(utils.get_dataset_root(), folding, True, False, exclude_novel=False)
     return base_set(ds, "test", cfg)
 
 def get_meta_train_set(cfg):
     folding = cfg.DATASET.PASCAL5i.folding
-    ds = Pascal5iReader('/data', folding, True, True, exclude_novel=False)
+    ds = Pascal5iReader(utils.get_dataset_root(), folding, True, True, exclude_novel=False)
     return base_set(ds, "train", cfg)
 
 def get_meta_test_set(cfg):
     folding = cfg.DATASET.PASCAL5i.folding
-    ds = Pascal5iReader('/data', folding, False, False, exclude_novel=False)
+    ds = Pascal5iReader(utils.get_dataset_root(), folding, False, False, exclude_novel=False)
     return base_set(ds, "test", cfg)
 
 def get_continual_vanilla_train_set(cfg):
-    ds = PascalVOCSegReader('/data', True, download=True)
+    ds = PascalVOCSegReader(utils.get_dataset_root(), True, download=True)
     return base_set(ds, "test", cfg) # Use test config to keep original scale of the image.
 
 def get_continual_aug_train_set(cfg):
-    ds = PascalVOCSegReader('/data', True, download=True)
+    ds = PascalVOCSegReader(utils.get_dataset_root(), True, download=True)
     return base_set(ds, "train", cfg)
 
 def get_continual_test_set(cfg):
-    ds = PascalVOCSegReader('/data', False, download=True)
+    ds = PascalVOCSegReader(utils.get_dataset_root(), False, download=True)
     return base_set(ds, "test", cfg)
 
 def get_sequential_continual_test_set(cfg):
@@ -209,6 +206,6 @@ def get_sequential_continual_test_set(cfg):
     all_ds_list = []
     for i in range(16, 21):
         exclusion_label_list.remove(i)
-        ds = PartialPascalReader('/data', False, exclusion_label_list)
+        ds = PartialPascalReader(utils.get_dataset_root(), False, exclusion_label_list)
         all_ds_list.append(base_set(ds, "test", cfg))
     return all_ds_list

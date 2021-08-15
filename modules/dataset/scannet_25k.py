@@ -6,6 +6,8 @@ import torch
 import torchvision
 from torchvision import datasets, transforms
 from PIL import Image
+
+import utils
 from .baseset import base_set
 
 class ScanNet25K(datasets.vision.VisionDataset):
@@ -62,9 +64,9 @@ class ScanNet25K(datasets.vision.VisionDataset):
         return len(self.img_paths)
 
 def get_train_set(cfg):
-    ds = ScanNet25K("/data")
+    ds = ScanNet25K(utils.get_dataset_root())
     return base_set(ds, "train", cfg)
 
 def get_val_set(cfg):
-    ds =ScanNet25K("/data")
+    ds =ScanNet25K(utils.get_dataset_root())
     return base_set(ds, "test", cfg)

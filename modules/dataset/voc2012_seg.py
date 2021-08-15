@@ -5,8 +5,9 @@ from scipy.io import loadmat
 from copy import deepcopy
 import numpy as np
 import torch
-import torchvision
 from torchvision import datasets, transforms
+
+import utils
 from .baseset import base_set
 
 def maybe_download_voc(root):
@@ -227,9 +228,9 @@ def get_train_set(cfg):
     # Note: previous works including FCN (https://arxiv.org/pdf/1411.4038.pdf)
     # or OSLSM (https://arxiv.org/pdf/1709.03410.pdf) use SBD annotations.
     # Here we follow the convention and use augmented notations from SBD
-    ds = PascalVOCSegReader("/data", True, download=True)
+    ds = PascalVOCSegReader(utils.get_dataset_root(), True, download=True)
     return base_set(ds, "train", cfg)
 
 def get_val_set(cfg):
-    ds = PascalVOCSegReader("/data", False, download=True)
+    ds = PascalVOCSegReader(utils.get_dataset_root(), False, download=True)
     return base_set(ds, "test", cfg)

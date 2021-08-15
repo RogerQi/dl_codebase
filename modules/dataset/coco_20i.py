@@ -2,17 +2,15 @@
 Module containing reader to parse pascal_5i dataset from SBD and VOC2012
 """
 import os
-import random
-from PIL import Image
-from scipy.io import loadmat
 from copy import deepcopy
-import numpy as np
 import torch
 import torchvision
+
+import utils
 from .baseset import base_set
 from .coco import COCOSeg
 
-from IPython import embed
+COCO_PATH = os.path.join(utils.get_dataset_root(), "COCO2017")
 
 class COCO20iReader(torchvision.datasets.vision.VisionDataset):
     def __init__(self, root, fold, base_stage, split, exclude_novel=False):
@@ -137,32 +135,32 @@ class COCO20iReader(torchvision.datasets.vision.VisionDataset):
 
 def get_train_set(cfg):
     folding = cfg.DATASET.COCO20i.folding
-    ds = COCO20iReader("/data/COCO2017/", folding, True, True, exclude_novel=True)
+    ds = COCO20iReader(COCO_PATH, folding, True, True, exclude_novel=True)
     return base_set(ds, "train", cfg)
 
 def get_val_set(cfg):
     folding = cfg.DATASET.COCO20i.folding
-    ds = COCO20iReader("/data/COCO2017/", folding, True, False, exclude_novel=False)
+    ds = COCO20iReader(COCO_PATH, folding, True, False, exclude_novel=False)
     return base_set(ds, "test", cfg)
 
 def get_meta_train_set(cfg):
     folding = cfg.DATASET.COCO20i.folding
-    ds = COCO20iReader("/data/COCO2017/", folding, True, True, exclude_novel=False)
+    ds = COCO20iReader(COCO_PATH, folding, True, True, exclude_novel=False)
     return base_set(ds, "train", cfg)
 
 def get_meta_test_set(cfg):
     folding = cfg.DATASET.COCO20i.folding
-    ds = COCO20iReader("/data/COCO2017/", folding, False, False, exclude_novel=False)
+    ds = COCO20iReader(COCO_PATH, folding, False, False, exclude_novel=False)
     return base_set(ds, "test", cfg)
 
 def get_continual_vanilla_train_set(cfg):
-    ds = COCOSeg("/data/COCO2017/", True)
+    ds = COCOSeg(COCO_PATH, True)
     return base_set(ds, "test", cfg) # Use test config to keep original scale of the image.
 
 def get_continual_aug_train_set(cfg):
-    ds = COCOSeg("/data/COCO2017/", True)
+    ds = COCOSeg(COCO_PATH, True)
     return base_set(ds, "train", cfg)
 
 def get_continual_test_set(cfg):
-    ds = COCOSeg("/data/COCO2017/", False)
+    ds = COCOSeg(COCO_PATH, False)
     return base_set(ds, "test", cfg)

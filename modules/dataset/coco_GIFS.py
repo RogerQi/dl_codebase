@@ -1,11 +1,16 @@
 """
 Module containing reader to parse pascal_5i dataset from SBD and VOC2012
 """
+import os
 from copy import deepcopy
 import torch
 import torchvision
+
+import utils
 from .baseset import base_set
 from .coco import COCOSeg
+
+COCO_PATH = os.path.join(utils.get_dataset_root(), "COCO2017")
 
 class COCOGIFSReader(torchvision.datasets.vision.VisionDataset):
     NOVEL_CLASSES_LIST = ["cow", "giraffe", "suitcase", "frisbee", "skateboard", "carrot", "scissors"]
@@ -177,36 +182,36 @@ class PartialCOCOReader(torchvision.datasets.vision.VisionDataset):
         return img, target_tensor
 
 def get_train_set(cfg):
-    ds = COCOGIFSReader("/data/COCO2017/", True, True, exclude_novel=True)
+    ds = COCOGIFSReader(COCO_PATH, True, True, exclude_novel=True)
     return base_set(ds, "train", cfg)
 
 def get_val_set(cfg):
-    ds = COCOGIFSReader("/data/COCO2017/", True, False, exclude_novel=False)
+    ds = COCOGIFSReader(COCO_PATH, True, False, exclude_novel=False)
     return base_set(ds, "test", cfg)
 
 def get_meta_train_set(cfg):
-    ds = COCOGIFSReader("/data/COCO2017/", True, True, exclude_novel=False)
+    ds = COCOGIFSReader(COCO_PATH, True, True, exclude_novel=False)
     return base_set(ds, "train", cfg)
 
 def get_meta_test_set(cfg):
-    ds = COCOGIFSReader("/data/COCO2017/", False, False, exclude_novel=False)
+    ds = COCOGIFSReader(COCO_PATH, False, False, exclude_novel=False)
     return base_set(ds, "test", cfg)
 
 def get_continual_vanilla_train_set(cfg):
-    ds = COCOSeg("/data/COCO2017/", True)
+    ds = COCOSeg(COCO_PATH, True)
     return base_set(ds, "test", cfg) # Use test config to keep original scale of the image.
 
 def get_continual_aug_train_set(cfg):
-    ds = COCOSeg("/data/COCO2017/", True)
+    ds = COCOSeg(COCO_PATH, True)
     return base_set(ds, "train", cfg)
 
 def get_continual_test_set(cfg):
-    ds = COCOSeg("/data/COCO2017/", False)
+    ds = COCOSeg(COCO_PATH, False)
     return base_set(ds, "test", cfg)
 
 def get_sequential_continual_test_set(cfg):
     all_ds_list = []
     for i in range(len(COCOGIFSReader.NOVEL_CLASSES_LIST)):
-        ds = PartialCOCOReader('/data/COCO2017/', False, i + 1)
+        ds = PartialCOCOReader(COCO_PATH, False, i + 1)
         all_ds_list.append(base_set(ds, "test", cfg))
     return all_ds_list

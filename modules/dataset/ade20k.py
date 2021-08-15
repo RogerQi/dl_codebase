@@ -1,16 +1,13 @@
 import os
-import shutil
 import json
-import csv
 from PIL import Image
-from scipy.io import loadmat
 import numpy as np
 import torch
 import torchvision
 from torchvision import datasets, transforms
-from .baseset import base_set
 
-import time
+import utils
+from .baseset import base_set
 
 class ADE20KSegReader(datasets.vision.VisionDataset):
     '''
@@ -65,9 +62,9 @@ def get_train_set(cfg):
     # Note: previous works including FCN (https://arxiv.org/pdf/1411.4038.pdf)
     # or OSLSM (https://arxiv.org/pdf/1709.03410.pdf) use SBD annotations.
     # Here we follow the convention and use augmented notations from SBD
-    ds = ADE20KSegReader("/data", True)
+    ds = ADE20KSegReader(utils.get_dataset_root(), True)
     return base_set(ds, "train", cfg)
 
 def get_val_set(cfg):
-    ds = ADE20KSegReader("/data", False)
+    ds = ADE20KSegReader(utils.get_dataset_root(), False)
     return base_set(ds, "test", cfg)

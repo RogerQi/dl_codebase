@@ -1,21 +1,19 @@
-import sys
 import os
-import json
 import numpy as np
 import torch
-import torchvision
 import shutil
-
+from tqdm import trange
 from copy import deepcopy
 from torchvision import datasets, transforms
 from PIL import Image
+
 from pycocotools import mask as coco_mask
 from pycocotools.coco import COCO
+
+import utils
 from .baseset import base_set
-from tqdm import trange
 
-from IPython import embed
-
+COCO_PATH = os.path.join(utils.get_dataset_root(), "COCO2017")
 # 2017 train images normalization constants
 #   mean: 0.4700, 0.4468, 0.4076
 #   sd: 0.2439, 0.2390, 0.2420
@@ -137,9 +135,9 @@ class COCOSeg(datasets.vision.VisionDataset):
         return len(self.coco.imgs)
 
 def get_train_set(cfg):
-    ds = COCOSeg("/data/COCO2017/", True)
+    ds = COCOSeg(COCO_PATH, True)
     return base_set(ds, "train", cfg)
 
 def get_val_set(cfg):
-    ds = COCOSeg("/data/COCO2017", False)
+    ds = COCOSeg(COCO_PATH, False)
     return base_set(ds, "test", cfg)

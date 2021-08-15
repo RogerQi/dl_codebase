@@ -4,11 +4,10 @@ import pickle
 import numpy as np
 from copy import deepcopy
 from PIL import Image
-import torch
-from torchvision import datasets, transforms
+
+import utils
 from .baseset import base_set
 
-from IPython import embed
 
 class mini_background_img:
     def __init__(self, root, split):
@@ -60,15 +59,15 @@ class mini_imagenet:
         return deepcopy(self.label_range)
 
 def get_train_set(cfg):
-    ds = mini_imagenet('/data', 'base')
+    ds = mini_imagenet(utils.get_dataset_root(), 'base')
     return base_set(ds, "train", cfg)
 
 def get_val_set(cfg):
-    ds = mini_imagenet('/data', 'val')
+    ds = mini_imagenet(utils.get_dataset_root(), 'val')
     return base_set(ds, "test", cfg)
 
 def get_test_set(cfg):
-    ds = mini_imagenet('/data', 'novel')
+    ds = mini_imagenet(utils.get_dataset_root(), 'novel')
     return base_set(ds, "test", cfg)
 
 def get_meta_train_set(cfg):
@@ -78,9 +77,9 @@ def get_meta_test_set(cfg):
     return get_test_set(cfg)
 
 def get_bg_train_set(cfg):
-    ds = mini_background_img('/data', 'base')
+    ds = mini_background_img(utils.get_dataset_root(), 'base')
     return base_set(ds, 'train', cfg)
 
 def get_bg_test_set(cfg):
-    ds = mini_background_img('/data', 'novel')
+    ds = mini_background_img(utils.get_dataset_root(), 'novel')
     return base_set(ds, 'test', cfg)
