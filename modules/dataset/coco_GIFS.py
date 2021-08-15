@@ -1,23 +1,16 @@
 """
 Module containing reader to parse pascal_5i dataset from SBD and VOC2012
 """
-import os
-import random
-from PIL import Image
-from scipy.io import loadmat
 from copy import deepcopy
-import numpy as np
 import torch
 import torchvision
 from .baseset import base_set
 from .coco import COCOSeg
 
-from IPython import embed
-
 class COCOGIFSReader(torchvision.datasets.vision.VisionDataset):
+    NOVEL_CLASSES_LIST = ["cow", "giraffe", "suitcase", "frisbee", "skateboard", "carrot", "scissors"]
     # The authors of GIFS used classes that did not appear in ImageNet.
     # Refer to Section 5.1 in https://arxiv.org/pdf/2012.01415.pdf for details
-    NOVEL_CLASSES_LIST = ["cow", "giraffe", "suitcase", "frisbee", "skateboard", "carrot", "scissors"]
     def __init__(self, root, base_stage, split, exclude_novel=False):
         """
         pascal_5i dataset reader
@@ -134,6 +127,55 @@ class COCOGIFSReader(torchvision.datasets.vision.VisionDataset):
             new_tensor[target_tensor == -1] = -1 # ignore mask
             return new_tensor
 
+class PartialCOCOReader(torchvision.datasets.vision.VisionDataset):
+    def __init__(self, root, split, count):
+        """
+        Reader that partially reads the PASCAL dataset
+        """
+        super(PartialCOCOReader, self).__init__(root, None, None, None)
+        self.vanilla_ds = COCOSeg(root, split)
+
+        self.CLASS_NAMES_LIST = self.vanilla_ds.CLASS_NAMES_LIST
+
+        exclusion_list = sorted([self.CLASS_NAMES_LIST.index(n) for n in COCOGIFSReader.NOVEL_CLASSES_LIST])
+
+        assert count > 0
+        assert count <= len(exclusion_list)
+        exclusion_list = exclusion_list[count:]
+
+        self.label_list = []
+
+        for l in self.vanilla_ds.get_label_range():
+            if l in exclusion_list:
+                continue
+            self.label_list.append(l)
+        
+        self.label_list = sorted(self.label_list)
+
+        self.subset_idx = [i for i in range(len(self.vanilla_ds))]
+        self.subset_idx = set(self.subset_idx)
+
+        for l in exclusion_list:
+            self.subset_idx -= set(self.vanilla_ds.get_class_map(l))
+        self.subset_idx = sorted(list(self.subset_idx))
+    
+    def __len__(self):
+        return len(self.subset_idx)
+    
+    def get_class_map(self, class_id):
+        """
+        class_id here is subsetted. (e.g., class_idx is 12 in vanilla dataset may get translated to 2)
+        """
+        raise NotImplementedError
+    
+    def get_label_range(self):
+        return deepcopy(self.label_list)
+
+    def __getitem__(self, idx: int):
+        assert 0 <= idx and idx < len(self.subset_idx)
+        img, target_tensor = self.vanilla_ds[self.subset_idx[idx]]
+        return img, target_tensor
+
 def get_train_set(cfg):
     ds = COCOGIFSReader("/data/COCO2017/", True, True, exclude_novel=True)
     return base_set(ds, "train", cfg)
@@ -161,3 +203,10 @@ def get_continual_aug_train_set(cfg):
 def get_continual_test_set(cfg):
     ds = COCOSeg("/data/COCO2017/", False)
     return base_set(ds, "test", cfg)
+
+def get_sequential_continual_test_set(cfg):
+    all_ds_list = []
+    for i in range(len(COCOGIFSReader.NOVEL_CLASSES_LIST)):
+        ds = PartialCOCOReader('/data/COCO2017/', False, i + 1)
+        all_ds_list.append(base_set(ds, "test", cfg))
+    return all_ds_list

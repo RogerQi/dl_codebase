@@ -129,6 +129,9 @@ class COCOSeg(datasets.vision.VisionDataset):
     
     def get_class_map(self, class_id):
         return deepcopy((self.instance_class_map[class_id]))
+    
+    def get_label_range(self):
+        return [i + 1 for i in range(80)]
 
     def __len__(self):
         return len(self.coco.imgs)
