@@ -20,6 +20,7 @@ def parse_args():
     parser.add_argument('--cfg', help = "specify particular yaml configuration to use", required = True,
         default = "configs/mnist_torch_official.yaml", type = str)
     parser.add_argument('--load', help="specify saved checkpoint to evaluate", required=True, type=str)
+    parser.add_argument('--webcam', help='real-time evaluate using default webcam', action='store_true')
     parser.add_argument('--visfreq', help="visualize results for every n examples in test set",
         required=False, default=99999999999, type=int)
     args = parser.parse_args()
@@ -73,7 +74,11 @@ def main():
     trainer_func = trainer.dispatcher(cfg)
     my_trainer = trainer_func(cfg, backbone_net, post_processor, criterion, dataset_module, device)
 
-    val_metric = my_trainer.test_one(device)
+    if args.webcam:
+        my_trainer.live_run(device)
+    else:
+       val_metric = my_trainer.test_one(device)
+       print(val_metric)
 
 if __name__ == '__main__':
     main()
