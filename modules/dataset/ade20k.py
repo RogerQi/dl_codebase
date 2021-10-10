@@ -32,8 +32,6 @@ class ADE20KSegReader(datasets.vision.VisionDataset):
             dataset_json_path = os.path.join(self.base_dir, "validation.odgt")
 
         self.ds = [json.loads(x.rstrip()) for x in open(dataset_json_path, 'r')]
-
-        self.to_tensor_func = torchvision.transforms.ToTensor()
     
     def __getitem__(self, idx: int):
         """
@@ -50,10 +48,9 @@ class ADE20KSegReader(datasets.vision.VisionDataset):
         assert(segm.mode == "L")
         assert(raw_img.size[0] == segm.size[0])
         assert(raw_img.size[1] == segm.size[1])
-        img = self.to_tensor_func(raw_img)
         seg_mask = torch.tensor(np.array(segm, dtype = np.uint8), dtype = torch.int64)
         # seg_mask = self.label_unifier(seg_mask)
-        return (img, seg_mask)
+        return (raw_img, seg_mask)
 
     def __len__(self):
         return len(self.ds)

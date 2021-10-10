@@ -45,8 +45,8 @@ DATASET:
         crop_size: (512, 512)
 
 TRAIN:
-  max_epochs: 10
-  lr_max_epoch: 20
+  max_epochs: 5
+  lr_max_epoch: 10
   batch_size: 24
   initial_lr: 0.007
   lr_scheduler: "polynomial"

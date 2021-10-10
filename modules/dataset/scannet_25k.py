@@ -16,6 +16,9 @@ class ScanNet25K(datasets.vision.VisionDataset):
 
     Data availabel at http://kaldir.vc.in.tum.de/scannet/v2/tasks/scannet_frames_25k.zip
     '''
+
+    CLASS_NAMES_LIST = ["TODO" for i in range(41)]
+
     def __init__(self, root):
         super(ScanNet25K, self).__init__(root, None, None, None)
         root = os.path.join(root, "scannet_frames_25k")

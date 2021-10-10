@@ -26,6 +26,7 @@ def norm_tensor_to_np(cfg, arr):
 # A generalized imshow helper function which supports displaying (CxHxW) tensor
 def generalized_imshow(cfg, arr):
     if isinstance(arr, torch.Tensor) and arr.shape[0] == 3:
+        # TODO: check tensor type (float) to denormalize.
         arr = norm_tensor_to_np(cfg, arr)
     plt.imshow(arr)
     plt.show()

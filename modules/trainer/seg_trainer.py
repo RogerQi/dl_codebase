@@ -2,6 +2,7 @@ import time
 import numpy as np
 import cv2
 import torch
+from tqdm import tqdm
 
 import utils
 
@@ -36,8 +37,13 @@ class seg_trainer(trainer_base):
         return train_total_loss / len(self.train_loader)
 
     def val_one(self, device):
-        class_iou = self.eval_on_loader(self.val_loader, self.cfg.meta_training_num_classes)
-        print('\nTest set: Mean IoU {:.4f}'.format(np.mean(class_iou)))
+        if self.cfg.meta_training_num_classes != -1:
+            class_iou = self.eval_on_loader(self.val_loader, self.cfg.meta_training_num_classes)
+        else:
+            class_iou = self.eval_on_loader(self.val_loader, self.cfg.num_classes)
+        print('Test set: Mean IoU {:.4f}'.format(np.mean(class_iou)))
+        print("Class-wise IoU:")
+        print(class_iou)
         return np.mean(class_iou)
 
     def test_one(self, device):
@@ -51,7 +57,7 @@ class seg_trainer(trainer_base):
         class_intersection, class_union = (None, None)
         class_names_list = test_loader.dataset.dataset.CLASS_NAMES_LIST
         with torch.no_grad():
-            for idx, (data, target) in enumerate(test_loader):
+            for idx, (data, target) in tqdm(enumerate(test_loader)):
                 data, target = data.to(self.device), target.to(self.device)
                 feature = self.backbone_net(data)
                 ori_spatial_res = data.shape[-2:]

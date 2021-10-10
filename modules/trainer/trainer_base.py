@@ -15,6 +15,8 @@ class trainer_base:
         self.train_set = dataset_module.get_train_set(cfg)
         self.val_set = dataset_module.get_val_set(cfg)
 
+        print("Training set contains {} data points. Val set contains {} data points.".format(len(self.train_set), len(self.val_set)))
+
         # Prepare loaders
         self.use_cuda = not cfg.SYSTEM.use_cpu
         self.loader_kwargs = {'num_workers': cfg.SYSTEM.num_workers, 'pin_memory': cfg.SYSTEM.pin_memory} if self.use_cuda else {}

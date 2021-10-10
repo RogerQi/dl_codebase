@@ -40,8 +40,8 @@ class sequential_GIFS_seg_trainer(GIFS_seg_trainer):
     
     def continual_test_single_pass(self, support_set):
         self.partial_data_pool = {}
-        vanilla_backbone_net = deepcopy(self.backbone_net)
-        vanilla_post_processor = deepcopy(self.post_processor)
+        self.vanilla_backbone_net = deepcopy(self.backbone_net)
+        self.vanilla_post_processor = deepcopy(self.post_processor)
 
         all_novel_class_idx = sorted(list(support_set.keys()))
         base_class_idx = self.train_set.dataset.visible_labels
@@ -49,7 +49,7 @@ class sequential_GIFS_seg_trainer(GIFS_seg_trainer):
             base_class_idx.append(0)
         base_class_idx = sorted(base_class_idx)
 
-        vanilla_base_class_idx = deepcopy(base_class_idx)
+        self.vanilla_base_class_idx = deepcopy(base_class_idx)
         learned_novel_class_idx = []
 
         total_num_classes = len(all_novel_class_idx) + len(base_class_idx)
@@ -95,7 +95,7 @@ class sequential_GIFS_seg_trainer(GIFS_seg_trainer):
                 label = i + 1 # 0-indexed
                 if label in learned_novel_class_idx:
                     novel_iou_list.append(classwise_iou[i])
-                elif label in vanilla_base_class_idx:
+                elif label in self.vanilla_base_class_idx:
                     base_iou_list.append(classwise_iou[i])
                 else:
                     continue
@@ -109,7 +109,7 @@ class sequential_GIFS_seg_trainer(GIFS_seg_trainer):
             base_class_idx = sorted(base_class_idx)
 
         # Restore weights
-        self.backbone_net = vanilla_backbone_net
-        self.post_processor = vanilla_post_processor
+        self.backbone_net = self.vanilla_backbone_net
+        self.post_processor = self.vanilla_post_processor
 
         return classwise_iou

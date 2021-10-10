@@ -1,10 +1,9 @@
-import os
-import time
 import random
-import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 from copy import deepcopy
+from typing import List, Union
+
 import cv2
 import torch
 import torch.nn as nn
@@ -19,9 +18,7 @@ from backbone.deeplabv3_renorm import BatchRenorm2d
 import classifier
 import utils
 
-from .trainer_base import trainer_base
 from .seg_trainer import seg_trainer
-from dataset.special_loader import get_fs_seg_loader
 
 from IPython import embed
 
@@ -40,85 +37,6 @@ class GIFS_seg_trainer(seg_trainer):
 
     # self.train_one is inherited from seg trainer
     # self.val_one is inherited from seg trainer
-    
-    def live_run(self, device):
-        self.backbone_net.eval()
-        self.post_processor.eval()
-
-        cap = cv2.VideoCapture(0)
-        if not cap.isOpened():
-            print("Cannot open camera")
-            exit()
-        
-        image_to_tensor = torchvision.transforms.ToTensor()
-        normalizer = torchvision.transforms.Normalize(self.cfg.DATASET.TRANSFORM.TEST.TRANSFORMS_DETAILS.NORMALIZE.mean,
-                                    self.cfg.DATASET.TRANSFORM.TEST.TRANSFORMS_DETAILS.NORMALIZE.sd)
-        
-        base_class_name_list = [i for i in self.train_set.dataset.CLASS_NAMES_LIST if i not in self.train_set.dataset.NOVEL_CLASSES_LIST]
-        
-        while True:
-            # Capture frame-by-frame
-            ret, frame = cap.read()
-            # if frame is read correctly ret is True
-            if not ret:
-                print("Can't receive frame (stream end?). Exiting ...")
-                break
-            assert frame.shape == (480, 640, 3)
-            H, W, C = frame.shape
-            assert W >= H
-            strip_size = (W - H) // 2
-            frame = frame[:, strip_size:-strip_size, :]
-            H, W, C = frame.shape
-            assert H == W
-            frame = cv2.resize(frame, (480, 480), interpolation = cv2.INTER_LINEAR)
-            # Model Inference
-            data = image_to_tensor(frame) # 3 x H x W
-            # Image in OpenCV are stored as BGR. Need to convert to RGB
-            with torch.no_grad():
-                assert data.shape[0] == 3
-                tmp = data[0].clone()
-                data[0] = data[2]
-                data[2] = tmp
-            assert data.shape == (C, H, W)
-            assert data.min() >= 0
-            assert data.max() <= 1
-            data = normalizer(data)
-            data = data.view((1,) + data.shape) # B x 3 x H x W
-            with torch.no_grad():
-                # Forward Pass
-                data = data.to(device)
-                feature = self.backbone_net(data)
-                ori_spatial_res = data.shape[-2:]
-                output = self.post_processor(feature, ori_spatial_res)
-                # Visualization
-                pred_map = output.max(dim = 1)[1]
-                assert pred_map.shape[0] == 1
-                pred_np = pred_map[0].cpu().numpy()
-                predicted_label = utils.visualize_segmentation(self.cfg, data[0], pred_np, base_class_name_list)
-            # Display the resulting frame
-            cv2.imshow('raw_image', frame)
-            cv2.imshow('predicted_label', predicted_label)
-            key_press = cv2.waitKey(1)
-            if key_press == ord('q'):
-                # Quit!
-                break
-            elif key_press == ord('s'):
-                # Save image for segmentation!
-                cv2.imwrite("/tmp/temp.jpg", frame)
-                os.system('cd /home/roger/reproduction/fcanet && python3 annotator.py --backbone resnet --input /tmp/temp.jpg --output /tmp/temp_mask.png --sis')
-                provided_mask = cv2.imread('/tmp/temp_mask.png', cv2.IMREAD_UNCHANGED)
-                provided_mask = (provided_mask == 255).astype(np.uint8)
-                provided_mask = torch.tensor(provided_mask).view((1,) + provided_mask.shape).cuda() # 1 x H x W
-                # MAP on feature
-                class_weight_vec = utils.masked_average_pooling(provided_mask == 1, feature, True)
-                assert len(class_weight_vec.shape) == 1 # C
-                class_weight_vec = class_weight_vec.view((1,) + class_weight_vec.shape + (1, 1))
-                self.post_processor.pixel_classifier.class_mat.weight.data = torch.cat([self.post_processor.pixel_classifier.class_mat.weight.data, class_weight_vec])
-                obj_name = input("Name of the novel object: ")
-                base_class_name_list.append(obj_name)
-        # When everything done, release the capture
-        cap.release()
-        cv2.destroyAllWindows()
 
     def test_one(self, device, num_runs=5):
         num_shots = self.cfg.TASK_SPECIFIC.GIFS.num_shots
@@ -139,8 +57,7 @@ class GIFS_seg_trainer(seg_trainer):
                 image_candidates[k_i] -= vanilla_image_candidates[k_j]
             image_candidates[k_i] = sorted(list(image_candidates[k_i]))
 
-        # We use $num_runs$ consistent random seeds.
-        # For each seed, 1000 support-query pairs are sampled.
+        # We use a total of $num_runs$ consistent random seeds.
         np.random.seed(1221)
         seed_list = np.random.randint(0, 99999, size = (num_runs, ))
         
@@ -158,7 +75,9 @@ class GIFS_seg_trainer(seg_trainer):
                 selected_idx = np.random.choice(image_candidates[k], size=(num_shots, ), replace=False)
                 support_set[k] = list(selected_idx)
         
+            # get per-class IoU on the entire validation set based on results from the support set
             classwise_iou = self.continual_test_single_pass(support_set)
+
             novel_iou_list = []
             base_iou_list = []
             for i in range(len(classwise_iou)):
@@ -180,16 +99,33 @@ class GIFS_seg_trainer(seg_trainer):
         print("Harmonic IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_harm_iou_list), np.std(run_harm_iou_list)))
         print("Total IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_total_iou_list), np.std(run_total_iou_list)))
     
-    def classifier_weight_imprinting(self, base_class_idx, novel_class_idx, supp_img_bchw, supp_mask_bhw):
+    def classifier_weight_imprinting(self, base_id_list: List[int], novel_id_list: List[int], supp_img_bchw: torch.Tensor, supp_mask_bhw: torch.Tensor):
+        """Use masked average pooling to initialize a new 1x1 convolutional HEAD for semantic segmentation
+
+        The resulting classifier will produce per-pixel classification from class 0 (usually background)
+        upto class max(max(base_class_idx), max(novel_class_idx)). If there is discontinuity in base_class_idx
+        and novel_class_idx (e.g., base: [0, 1, 2, 4]; novel: [5, 6]), then the class weight of the non-used class
+        will be initialized as full zeros.
+
+        Args:
+            base_id_list (List[int]): a sorted list containing base class id
+            novel_id_list (List[int]): a sorted list containing novel class id
+            supp_img_bchw (torch.Tensor): Normalized support set image tensor
+            supp_mask_bhw (torch.Tensor): Complete segmentation mask of support set
+
+        Returns:
+            torch.Tensor: a weight vector that can be directly plugged back to
+                data.weight of the 1x1 classification convolution
+        """
         assert self.prv_backbone_net is not None
         assert self.prv_post_processor is not None
-        max_cls = max(max(base_class_idx), max(novel_class_idx)) + 1
-        assert self.prv_post_processor.pixel_classifier.class_mat.weight.data.shape[0] == len(base_class_idx)
+        max_cls = max(max(base_id_list), max(novel_id_list)) + 1
+        assert self.prv_post_processor.pixel_classifier.class_mat.weight.data.shape[0] == len(base_id_list)
 
         ori_cnt = 0
         class_weight_vec_list = []
         for c in range(max_cls):
-            if c in novel_class_idx:
+            if c in novel_id_list:
                 # Aggregate all candidates in support set
                 image_list = []
                 mask_list = []
@@ -205,7 +141,7 @@ class GIFS_seg_trainer(seg_trainer):
                 with torch.no_grad():
                     support_feature = self.prv_backbone_net(supp_img_bchw_tensor)
                     class_weight_vec = utils.masked_average_pooling(supp_mask_bhw_tensor == c, support_feature, True)
-            elif c in base_class_idx:
+            elif c in base_id_list:
                 # base class. Copy weight from learned HEAD
                 class_weight_vec = self.prv_post_processor.pixel_classifier.class_mat.weight.data[ori_cnt]
                 ori_cnt += 1

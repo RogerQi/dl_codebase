@@ -23,5 +23,8 @@ def dispatcher(cfg):
     elif task_name == "sequential_GIFS":
         from .sequential_GIFS_seg_trainer import sequential_GIFS_seg_trainer as sequential_GIFS_seg_trainer_fn
         return sequential_GIFS_seg_trainer_fn
+    elif task_name == "few_shot_incremental":
+        from .fs_incremental_trainer import fs_incremental_trainer as fs_incremental_trainer_fn
+        return fs_incremental_trainer_fn
     else:
         raise NotImplementedError

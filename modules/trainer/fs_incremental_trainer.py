@@ -2,6 +2,7 @@ import os
 import random
 import numpy as np
 import matplotlib.pyplot as plt
+from PIL import Image
 from copy import deepcopy
 import cv2
 from numpy.core.defchararray import replace
@@ -26,30 +27,7 @@ from IPython import embed
 def harmonic_mean(base_iou, novel_iou):
     return 2 / (1. / base_iou + 1. / novel_iou)
 
-my_color_jitter = torchvision.transforms.ColorJitter(
-    brightness=0.0,
-    contrast=0.0,
-    saturation=0.0,
-    hue=0.1
-)
-
 def copy_and_paste(novel_img_chw, novel_mask_hw, base_img_chw, base_mask_hw, mask_id):
-    # Color jittering
-    # if torch.rand(1) < 0.5:
-    #     novel_img_chw = my_color_jitter(novel_img_chw)
-
-    # Random Scaling
-    # if torch.rand(1) < 0.5:
-    #     h, w = novel_mask_hw.shape
-    #     min_h = int(h * 0.9)
-    #     max_h = min(int(h * 1.3333), base_mask_hw.shape[0])
-    #     min_w = int(w * 0.9)
-    #     max_w = min(int(w * 1.3333), base_mask_hw.shape[1])
-    #     h = torch.randint(min_h, max_h)
-    #     w = torch.randint(min_w, max_w)
-    #     novel_img_chw = tr_F.resize(novel_img_chw, (h, w))
-    #     novel_mask_hw = tr_F.resize(novel_mask_hw, (h, w), interpolation=torchvision.transforms.InterpolationMode.NEAREST)
-
     # Horizontal Flipping
     if torch.rand(1) < 0.5:
         novel_img_chw = tr_F.hflip(novel_img_chw)
@@ -231,15 +209,12 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                 img_chw, mask_hw = selected_sample
                 syn_img_chw, syn_mask_hw = copy_and_paste(img_chw, mask_hw, syn_img_chw, syn_mask_hw, selected_class)
 
-        if torch.rand(1) < 0.8:
+        if torch.rand(1) < 0.8: 
             num_objs = np.random.choice([1, 2, 3], p=(0, 1, 0))
             for i in range(num_objs):
                 selected_sample = random.choice(self.partial_data_pool[novel_obj_id])
                 img_chw, mask_hw = selected_sample
                 syn_img_chw, syn_mask_hw = copy_and_paste(img_chw, mask_hw, syn_img_chw, syn_mask_hw, novel_obj_id)
-        
-        # Water bottle
-        # TV
 
         return (syn_img_chw, syn_mask_hw)
 
@@ -311,8 +286,8 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
 
                 # L2 regularization on feature extractor
                 with torch.no_grad():
-                    ori_feature = self.prv_backbone_net(data_bchw)
-                    ori_logit = self.prv_post_processor(ori_feature, ori_spatial_res, scale_factor=10)
+                    ori_feature = self.vanilla_backbone_net(data_bchw)
+                    ori_logit = self.vanilla_post_processor(ori_feature, ori_spatial_res, scale_factor=10)
 
                 if self.cfg.TASK_SPECIFIC.GIFS.pseudo_base_label:
                     novel_mask = torch.zeros_like(target_bhw)
@@ -329,7 +304,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                 regularization_loss = regularization_loss * self.cfg.TASK_SPECIFIC.GIFS.feature_reg_lambda # hyperparameter lambda
                 loss = loss + regularization_loss
                 # L2 regulalrization on base classes
-                clf_loss = l2_criterion(output[:,base_class_idx,:,:], ori_logit) * self.cfg.TASK_SPECIFIC.GIFS.classifier_reg_lambda
+                clf_loss = l2_criterion(output[:,self.vanilla_base_class_idx,:,:], ori_logit) * self.cfg.TASK_SPECIFIC.GIFS.classifier_reg_lambda
                 loss = loss + clf_loss
 
                 optimizer.zero_grad() # reset gradient
