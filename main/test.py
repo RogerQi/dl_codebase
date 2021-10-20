@@ -63,16 +63,14 @@ def main():
     post_processor = classifier.dispatcher(cfg, feature_shape)
     
     post_processor = post_processor.to(device)
-    
-    print("Initializing backbone with trained weights from: {}".format(args.load))
-    trained_weight_dict = torch.load(args.load, map_location=device_str)
-    backbone_net.load_state_dict(trained_weight_dict["backbone"], strict=True)
-    post_processor.load_state_dict(trained_weight_dict["head"], strict=True)
 
     criterion = loss.dispatcher(cfg)
 
     trainer_func = trainer.dispatcher(cfg)
     my_trainer = trainer_func(cfg, backbone_net, post_processor, criterion, dataset_module, device)
+
+    print("Initializing backbone with trained weights from: {}".format(args.load))
+    my_trainer.load_model(args.load)
 
     if args.webcam:
         my_trainer.live_run(device)

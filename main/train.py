@@ -77,16 +77,6 @@ def main():
         else:
             backbone_net.load_state_dict(pretrained_weight_dict, strict=False)
 
-    start_epoch = 1
-    if args.resume != "NA":
-        sub_str = args.resume[args.resume.index('epoch') + 5:]
-        start_epoch = int(sub_str[:sub_str.index('_')]) + 1
-        assert start_epoch < cfg.TRAIN.max_epochs
-        print("Resuming training from epoch {}".format(start_epoch))
-        trained_weight_dict = torch.load(args.resume, map_location=device_str)
-        backbone_net.load_state_dict(trained_weight_dict['backbone'], strict=True)
-        post_processor.load_state_dict(trained_weight_dict['head'], strict=True)
-
     criterion = loss.dispatcher(cfg)
 
     trainable_params = list(backbone_net.parameters()) + list(post_processor.parameters())
@@ -122,12 +112,20 @@ def main():
 
     best_val_metric = 0
 
+    trainer_func = trainer.dispatcher(cfg)
+    my_trainer = trainer_func(cfg, backbone_net, post_processor, criterion, dataset_module, device)
+
+    start_epoch = 1
+    if args.resume != "NA":
+        sub_str = args.resume[args.resume.index('epoch') + 5:]
+        start_epoch = int(sub_str[:sub_str.index('_')]) + 1
+        assert start_epoch < cfg.TRAIN.max_epochs
+        print("Resuming training from epoch {}".format(start_epoch))
+        my_trainer.load_model(args.resume)
+
     # Tune LR scheduler
     for epoch in range(1, start_epoch):
         scheduler.step()
-    
-    trainer_func = trainer.dispatcher(cfg)
-    my_trainer = trainer_func(cfg, backbone_net, post_processor, criterion, dataset_module, device)
 
     for epoch in range(start_epoch, cfg.TRAIN.max_epochs + 1):
         start_cp = time.time()

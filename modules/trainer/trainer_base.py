@@ -26,18 +26,37 @@ class trainer_base:
 
     @abstractmethod
     def train_one(self, device, optimizer, epoch):
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def val_one(self, device):
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def test_one(self, device):
-        pass
+        raise NotImplementedError
+
+    @abstractmethod
+    def live_run(self, device):
+        raise NotImplementedError
 
     def save_model(self, file_path):
+        """Save default model (backbone_net, post_processor to a specified file path)
+
+        Args:
+            file_path (str): path to save the model
+        """
         torch.save({
             "backbone": self.backbone_net.state_dict(),
             "head": self.post_processor.state_dict()
-        }, file_path)  
+        }, file_path)
+    
+    def load_model(self, file_path):
+        """Load weights for default model components (backbone_net, post_process) from a given file path
+
+        Args:
+            file_path (str): path to trained weights
+        """
+        trained_weight_dict = torch.load(file_path, map_location=self.device)
+        self.backbone_net.load_state_dict(trained_weight_dict['backbone'], strict=True)
+        self.post_processor.load_state_dict(trained_weight_dict['head'], strict=True)
