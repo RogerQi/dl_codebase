@@ -14,6 +14,7 @@ class cos(nn.Module):
         self.scale_factor = 30
 
     def forward(self, x, scale_factor=None):
+        assert len(x.shape) == 4 # BCHW
         x = torch.flatten(x, start_dim = 1)
         x_norm = torch.norm(x, p=2, dim =1).unsqueeze(1).expand_as(x)
         x_normalized = x.div(x_norm+ 1e-5)

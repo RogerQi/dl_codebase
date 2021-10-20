@@ -44,8 +44,6 @@ class base_set(torch.utils.data.Dataset):
         assert len(transforms_list) != 0
         if transforms_list == ('none',):
             return transforms.Compose([])
-        if transforms_list == ('normalize'):
-            return transforms.Compose([self._get_dataset_normalizer(transforms_cfg)])
         # Nontrivial transforms...
         try:
             normalize_first_occurence = transforms_list.index("normalize")

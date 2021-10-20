@@ -168,9 +168,8 @@ class ResNet(backbone_base):
             layers.append(block(self.inplanes, planes, dilation=dilation, conv=self.conv, norm=self.norm))
 
         return nn.Sequential(*layers)
-
-    def forward(self, x):
-        size = (x.shape[2], x.shape[3])
+    
+    def feature_forward(self, x):
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
@@ -181,9 +180,13 @@ class ResNet(backbone_base):
         x = self.layer3(x)
         x = self.layer4(x)
 
-        x = self.aspp(x)
         return x
 
+    def forward(self, x):
+        # TODO: aspp should be considered as decoder
+        x = self.feature_forward(x)
+        x = self.aspp(x)
+        return x
 
 def deeplabv3_resnet50(cfg):
     """Constructs a ResNet-50 model.
