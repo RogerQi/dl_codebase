@@ -168,6 +168,8 @@ _C.TASK_SPECIFIC.GIFS.backbone_lr = 1e-3
 _C.TASK_SPECIFIC.GIFS.classifier_lr = 1e-3
 _C.TASK_SPECIFIC.GIFS.feature_reg_lambda = 0.1
 _C.TASK_SPECIFIC.GIFS.classifier_reg_lambda = 0.1
+_C.TASK_SPECIFIC.GIFS.context_aware_sampling = False
+_C.TASK_SPECIFIC.GIFS.synthetic_blending = 'none' # ('none', 'harmonization', 'gaussian')
 
 # ---------------------------
 # | End Default Config

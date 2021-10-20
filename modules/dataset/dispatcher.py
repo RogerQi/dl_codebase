@@ -24,6 +24,8 @@ def dispatcher(cfg):
         from .scannet_25k import get_train_set, get_val_set
     elif dataset_name == "coco_20i":
         from .coco_20i import get_train_set, get_val_set
+    elif dataset_name == "places365_stanford":
+        from .places365_stanford import get_train_set, get_val_set
     else:
         raise NotImplementedError
     return [get_train_set(cfg), get_val_set(cfg)]

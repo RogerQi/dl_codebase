@@ -69,6 +69,8 @@ TASK_SPECIFIC:
     classifier_lr: 1e-2
     feature_reg_lambda: 0.1
     classifier_reg_lambda: 0.0
+    context_aware_sampling: True
+    synthetic_blending: 'none'
 
 TEST:
   batch_size: 1
