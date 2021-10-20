@@ -9,6 +9,7 @@
 *.jpg
 *.png
 *.jpeg
+*.pth
 
 # Jupyter Notebook
 .ipynb_checkpoints
