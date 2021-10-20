@@ -32,3 +32,8 @@ TODOs
 - Integrate reproducibility package such as Sacred
 - Support for Detection
 - Support for 3D CV task
+- Implement some nice features from the MIT ADE20K codebase
+    - Batch random resizing augmentation
+    - encoder/decoder design
+    - deep supervision
+
