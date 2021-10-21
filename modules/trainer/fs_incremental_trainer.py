@@ -22,7 +22,7 @@ import classifier
 import utils
 
 from .sequential_GIFS_seg_trainer import sequential_GIFS_seg_trainer
-from dataset.special_loader import get_fs_seg_loader
+from IPython import embed
 
 class scene_clf_head(nn.Module):
     def __init__(self, indim, outdim):
@@ -53,6 +53,8 @@ class scene_clf_head(nn.Module):
 def harmonic_mean(base_iou, novel_iou):
     return 2 / (1. / base_iou + 1. / novel_iou)
 
+memory_bank_size = 500
+
 class fs_incremental_trainer(sequential_GIFS_seg_trainer):
     def __init__(self, cfg, backbone_net, post_processor, criterion, dataset_module, device):
         super(fs_incremental_trainer, self).__init__(cfg, backbone_net, post_processor, criterion, dataset_module, device)
@@ -62,7 +64,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         self.demo_pool = {}
 
         self.base_img_candidates = np.arange(0, len(self.train_set))
-        self.base_img_candidates = np.random.choice(self.base_img_candidates, replace=False, size=(500,))
+        self.base_img_candidates = np.random.choice(self.base_img_candidates, replace=False, size=(memory_bank_size,))
 
         # init a scene classification head
         self.scene_classifier = scene_clf_head(2048, 365).to(self.device) # 365 classes
@@ -229,7 +231,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         # Sample from partial data pool
         # Synthesis probabilities are computed using virtual RFS
         # TODO(roger): automate this probability computation
-        if len(self.partial_data_pool) > 1 and torch.rand(1) < 0.5568:
+        if len(self.partial_data_pool) > 1 and torch.rand(1) < 0.5124: # VOC: 0.5568 COCO: 0.5124
             # select an old class
             candidate_classes = [c for c in self.partial_data_pool.keys() if c != novel_obj_id]
             for i in range(num_existing_objects):
@@ -238,7 +240,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                 img_chw, mask_hw = selected_sample
                 syn_img_chw, syn_mask_hw = self.copy_and_paste(img_chw, mask_hw, syn_img_chw, syn_mask_hw, selected_class)
 
-        if torch.rand(1) < 0.7424:
+        if torch.rand(1) < 0.6832: # VOC: 0.7424 COCO: 0.6832
             for i in range(num_novel_objects):
                 selected_sample = random.choice(self.partial_data_pool[novel_obj_id])
                 img_chw, mask_hw = selected_sample
@@ -454,7 +456,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
 
         if self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling:
             self.base_data_w_context = list(set(self.base_data_w_context))
-            self.base_data_no_context = [i for i in range(500) if i not in self.base_data_w_context]
+            self.base_data_no_context = [i for i in range(memory_bank_size) if i not in self.base_data_w_context]
 
         self.backbone_net.train()
         self.post_processor.train()
@@ -518,7 +520,14 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                 regularization_loss = regularization_loss * self.cfg.TASK_SPECIFIC.GIFS.feature_reg_lambda # hyperparameter lambda
                 loss = loss + regularization_loss
                 # L2 regulalrization on base classes
-                clf_loss = l2_criterion(output[:,self.vanilla_base_class_idx,:,:], ori_logit) * self.cfg.TASK_SPECIFIC.GIFS.classifier_reg_lambda
+                if False:
+                    # regularization on weights itself
+                    vanilla_classifier_weights = self.vanilla_post_processor.pixel_classifier.class_mat.weight.data
+                    new_classifier_weights = self.post_processor.pixel_classifier.class_mat.weight.data[self.vanilla_base_class_idx]
+                    clf_loss = l2_criterion(new_classifier_weights, vanilla_classifier_weights) * self.cfg.TASK_SPECIFIC.GIFS.classifier_reg_lambda
+                else:
+                    # regularization on output logits
+                    clf_loss = l2_criterion(output[:,self.vanilla_base_class_idx,:,:], ori_logit) * self.cfg.TASK_SPECIFIC.GIFS.classifier_reg_lambda
                 loss = loss + clf_loss
 
                 optimizer.zero_grad() # reset gradient

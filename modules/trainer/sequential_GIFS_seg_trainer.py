@@ -84,26 +84,27 @@ class sequential_GIFS_seg_trainer(GIFS_seg_trainer):
             learned_novel_class_idx.append(c)
 
             # Evaluation
-            classwise_iou = self.eval_on_loader(self.test_loader_list[i], total_num_classes)
+            if i == len(all_novel_class_idx) - 1:
+                classwise_iou = self.eval_on_loader(self.test_loader_list[i], total_num_classes)
 
-            classwise_iou = np.array(classwise_iou)
+                classwise_iou = np.array(classwise_iou)
 
-            # to handle background and 0-indexing
-            novel_iou_list = []
-            base_iou_list = []
-            for i in range(len(classwise_iou)):
-                label = i + 1 # 0-indexed
-                if label in learned_novel_class_idx:
-                    novel_iou_list.append(classwise_iou[i])
-                elif label in self.vanilla_base_class_idx:
-                    base_iou_list.append(classwise_iou[i])
-                else:
-                    continue
-            base_iou = np.mean(base_iou_list)
-            novel_iou = np.mean(novel_iou_list)
+                # to handle background and 0-indexing
+                novel_iou_list = []
+                base_iou_list = []
+                for i in range(len(classwise_iou)):
+                    label = i + 1 # 0-indexed
+                    if label in learned_novel_class_idx:
+                        novel_iou_list.append(classwise_iou[i])
+                    elif label in self.vanilla_base_class_idx:
+                        base_iou_list.append(classwise_iou[i])
+                    else:
+                        continue
+                base_iou = np.mean(base_iou_list)
+                novel_iou = np.mean(novel_iou_list)
 
-            print("Base IoU: {:.4f} Novel IoU: {:.4f}".format(base_iou, novel_iou))
-            print("Novel class wise IoU: {}".format(novel_iou_list))
+                print("Base IoU: {:.4f} Novel IoU: {:.4f}".format(base_iou, novel_iou))
+                print("Novel class wise IoU: {}".format(novel_iou_list))
 
             base_class_idx.append(c)
             base_class_idx = sorted(base_class_idx)
