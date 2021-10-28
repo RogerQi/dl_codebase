@@ -11,5 +11,6 @@ class plain_c1(nn.Module):
 
     def forward(self, x, size_=None):
         x = self.clf_conv(x)
+        assert size_ is not None
         x = F.interpolate(x, size = size_, mode = 'bilinear', align_corners=False)
         return x

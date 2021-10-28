@@ -37,5 +37,6 @@ class seg_cos(nn.Module):
     
     def forward(self, x, size_=None, scale_factor=None):
         x = self.pixel_classifier(x, scale_factor=scale_factor)
+        assert size_ is not None
         x = F.interpolate(x, size = size_, mode = 'bilinear')
         return x
