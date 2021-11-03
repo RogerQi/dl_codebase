@@ -54,16 +54,29 @@ class sequential_GIFS_seg_trainer(GIFS_seg_trainer):
 
         total_num_classes = len(all_novel_class_idx) + len(base_class_idx)
 
-        for i, c in enumerate(all_novel_class_idx):
-            novel_class_idx = [c]
+        # Construct task batches
+        assert len(all_novel_class_idx) % self.cfg.TASK_SPECIFIC.GIFS.sequential_dataset_num_classes == 0
+        num_tasks = len(all_novel_class_idx) // self.cfg.TASK_SPECIFIC.GIFS.sequential_dataset_num_classes
+        ptr = 0
+        task_stream = []
+        for i in range(num_tasks):
+            current_task = []
+            for j in range(self.cfg.TASK_SPECIFIC.GIFS.sequential_dataset_num_classes):
+                current_task.append(all_novel_class_idx[ptr])
+                ptr += 1
+            task_stream.append(current_task)
+        assert ptr == len(all_novel_class_idx)
+
+        for i, task in enumerate(task_stream):
             # Aggregate elements in support set
             image_list = []
             mask_list = []
 
-            for idx in support_set[c]:
-                img_chw, mask_hw = self.continual_vanilla_train_set[idx]
-                image_list.append(img_chw)
-                mask_list.append(mask_hw)
+            for n_c in task:
+                for idx in support_set[n_c]:
+                    img_chw, mask_hw = self.continual_vanilla_train_set[idx]
+                    image_list.append(img_chw)
+                    mask_list.append(mask_hw)
 
             supp_img_bchw = torch.stack(image_list)
             supp_mask_bhw = torch.stack(mask_list)
@@ -76,12 +89,15 @@ class sequential_GIFS_seg_trainer(GIFS_seg_trainer):
             self.backbone_net.eval()
             self.post_processor.eval()
 
-            if len(base_class_idx) != self.prv_post_processor.pixel_classifier.class_mat.weight.data.shape[0]:
-                # squeeze the classifier weights
-                self.prv_post_processor.pixel_classifier.class_mat.weight.data = self.prv_post_processor.pixel_classifier.class_mat.weight.data[base_class_idx]
+            assert len(base_class_idx) == self.prv_post_processor.pixel_classifier.class_mat.weight.data.shape[0]
 
-            self.novel_adapt(base_class_idx, novel_class_idx, supp_img_bchw, supp_mask_bhw)
-            learned_novel_class_idx.append(c)
+            # if len(base_class_idx) != self.prv_post_processor.pixel_classifier.class_mat.weight.data.shape[0]:
+            #     # squeeze the classifier weights
+            #     print("Base IDX list and pixel classifier weight mismatched! {}".format(base_class_idx))
+            #     self.prv_post_processor.pixel_classifier.class_mat.weight.data = self.prv_post_processor.pixel_classifier.class_mat.weight.data[base_class_idx]
+
+            self.novel_adapt(base_class_idx, task, supp_img_bchw, supp_mask_bhw)
+            learned_novel_class_idx += task
 
             # Evaluation
             if i == len(all_novel_class_idx) - 1:
@@ -106,7 +122,7 @@ class sequential_GIFS_seg_trainer(GIFS_seg_trainer):
                 print("Base IoU: {:.4f} Novel IoU: {:.4f}".format(base_iou, novel_iou))
                 print("Novel class wise IoU: {}".format(novel_iou_list))
 
-            base_class_idx.append(c)
+            base_class_idx += task
             base_class_idx = sorted(base_class_idx)
 
         # Restore weights

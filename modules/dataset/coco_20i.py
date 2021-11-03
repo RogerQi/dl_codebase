@@ -34,6 +34,7 @@ class COCO20iReader(torchvision.datasets.vision.VisionDataset):
         super(COCO20iReader, self).__init__(root, None, None, None)
         assert fold >= 0 and fold <= 3
         assert split in [True, False]
+        assert base_stage
         self.base_stage = base_stage
 
         # Get augmented VOC dataset
@@ -133,6 +134,49 @@ class COCO20iReader(torchvision.datasets.vision.VisionDataset):
             target_tensor[ignore_pixel_idx] = -1
         return target_tensor
 
+class PartialCOCOReader(torchvision.datasets.vision.VisionDataset):
+    def __init__(self, root, split, exclusion_list):
+        """
+        Reader that partially reads the PASCAL dataset
+        """
+        super(PartialCOCOReader, self).__init__(root, None, None, None)
+        self.vanilla_ds = COCOSeg(root, split)
+
+        self.CLASS_NAMES_LIST = self.vanilla_ds.CLASS_NAMES_LIST
+
+        self.label_list = []
+
+        for l in self.vanilla_ds.get_label_range():
+            if l in exclusion_list:
+                continue
+            self.label_list.append(l)
+        
+        self.label_list = sorted(self.label_list)
+
+        self.subset_idx = [i for i in range(len(self.vanilla_ds))]
+        self.subset_idx = set(self.subset_idx)
+
+        for l in exclusion_list:
+            self.subset_idx -= set(self.vanilla_ds.get_class_map(l))
+        self.subset_idx = sorted(list(self.subset_idx))
+    
+    def __len__(self):
+        return len(self.subset_idx)
+    
+    def get_class_map(self, class_id):
+        """
+        class_id here is subsetted. (e.g., class_idx is 12 in vanilla dataset may get translated to 2)
+        """
+        raise NotImplementedError
+    
+    def get_label_range(self):
+        return deepcopy(self.label_list)
+
+    def __getitem__(self, idx: int):
+        assert 0 <= idx and idx < len(self.subset_idx)
+        img, target_tensor = self.vanilla_ds[self.subset_idx[idx]]
+        return img, target_tensor
+
 def get_train_set(cfg):
     folding = cfg.DATASET.COCO20i.folding
     ds = COCO20iReader(COCO_PATH, folding, True, True, exclude_novel=True)
@@ -143,15 +187,15 @@ def get_val_set(cfg):
     ds = COCO20iReader(COCO_PATH, folding, True, False, exclude_novel=False)
     return base_set(ds, "test", cfg)
 
-def get_meta_train_set(cfg):
-    folding = cfg.DATASET.COCO20i.folding
-    ds = COCO20iReader(COCO_PATH, folding, True, True, exclude_novel=False)
-    return base_set(ds, "train", cfg)
+# def get_meta_train_set(cfg):
+#     folding = cfg.DATASET.COCO20i.folding
+#     ds = COCO20iReader(COCO_PATH, folding, True, True, exclude_novel=False)
+#     return base_set(ds, "train", cfg)
 
-def get_meta_test_set(cfg):
-    folding = cfg.DATASET.COCO20i.folding
-    ds = COCO20iReader(COCO_PATH, folding, False, False, exclude_novel=False)
-    return base_set(ds, "test", cfg)
+# def get_meta_test_set(cfg):
+#     folding = cfg.DATASET.COCO20i.folding
+#     ds = COCO20iReader(COCO_PATH, folding, False, False, exclude_novel=False)
+#     return base_set(ds, "test", cfg)
 
 def get_continual_vanilla_train_set(cfg):
     ds = COCOSeg(COCO_PATH, True)
@@ -164,3 +208,14 @@ def get_continual_aug_train_set(cfg):
 def get_continual_test_set(cfg):
     ds = COCOSeg(COCO_PATH, False)
     return base_set(ds, "test", cfg)
+
+def get_sequential_continual_test_set(cfg):
+    exclusion_label_list = [i for i in range(61, 81)]
+    all_ds_list = []
+    for i in [61, 66, 71, 76]:
+        for j in range(5):
+            # 5 classes per step
+            exclusion_label_list.remove(i + j)
+        ds = PartialCOCOReader(COCO_PATH, False, exclusion_label_list)
+        all_ds_list.append(base_set(ds, "test", cfg))
+    return all_ds_list
