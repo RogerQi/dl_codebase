@@ -36,6 +36,7 @@ class COCOGIFSReader(torchvision.datasets.vision.VisionDataset):
         """
         super(COCOGIFSReader, self).__init__(root, None, None, None)
         assert split in [True, False]
+        assert base_stage
         self.base_stage = base_stage
 
         # Get augmented VOC dataset

@@ -32,6 +32,7 @@ class Pascal5iReader(torchvision.datasets.vision.VisionDataset):
         """
         super(Pascal5iReader, self).__init__(root, None, None, None)
         assert fold >= 0 and fold <= 3
+        assert base_stage
         self.base_stage = base_stage
 
         # Get augmented VOC dataset
@@ -179,15 +180,15 @@ def get_val_set(cfg):
     ds = Pascal5iReader(utils.get_dataset_root(), folding, True, False, exclude_novel=False)
     return base_set(ds, "test", cfg)
 
-def get_meta_train_set(cfg):
-    folding = cfg.DATASET.PASCAL5i.folding
-    ds = Pascal5iReader(utils.get_dataset_root(), folding, True, True, exclude_novel=False)
-    return base_set(ds, "train", cfg)
+# def get_meta_train_set(cfg):
+#     folding = cfg.DATASET.PASCAL5i.folding
+#     ds = Pascal5iReader(utils.get_dataset_root(), folding, True, True, exclude_novel=False)
+#     return base_set(ds, "train", cfg)
 
-def get_meta_test_set(cfg):
-    folding = cfg.DATASET.PASCAL5i.folding
-    ds = Pascal5iReader(utils.get_dataset_root(), folding, False, False, exclude_novel=False)
-    return base_set(ds, "test", cfg)
+# def get_meta_test_set(cfg):
+#     folding = cfg.DATASET.PASCAL5i.folding
+#     ds = Pascal5iReader(utils.get_dataset_root(), folding, False, False, exclude_novel=False)
+#     return base_set(ds, "test", cfg)
 
 def get_continual_vanilla_train_set(cfg):
     ds = PascalVOCSegReader(utils.get_dataset_root(), True, download=True)
