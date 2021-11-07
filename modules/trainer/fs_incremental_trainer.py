@@ -63,7 +63,9 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         self.blank_bank = {}
         self.demo_pool = {}
 
-        self.base_img_candidates = np.arange(0, len(self.train_set))
+        self.train_set_vanilla_label = dataset_module.get_train_set_vanilla_label(cfg)
+
+        self.base_img_candidates = np.arange(0, len(self.train_set_vanilla_label))
         self.base_img_candidates = np.random.choice(self.base_img_candidates, replace=False, size=(memory_bank_size,))
 
         # init a scene classification head
@@ -97,7 +99,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         else:
             # Sample from complete data pool (base dataset)
             base_img_idx = np.random.choice(self.base_img_candidates)
-        syn_img_chw, syn_mask_hw = self.train_set[base_img_idx]
+        syn_img_chw, syn_mask_hw = self.train_set_vanilla_label[base_img_idx]
         # Sample from partial data pool
         # Synthesis probabilities are computed using virtual RFS
         # TODO(roger): automate this probability computation
@@ -211,7 +213,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         # Compute feature vectors for data in the pool
         self.base_pool_cos_embeddings = []
         for base_data_idx in self.base_img_candidates:
-            img_chw, _ = self.train_set[base_data_idx]
+            img_chw, _ = self.train_set_vanilla_label[base_data_idx]
             img_bchw = img_chw.view((1,) + img_chw.shape).to(self.device)
             with torch.no_grad():
                 feature_map = self.backbone_net.feature_forward(img_bchw)
