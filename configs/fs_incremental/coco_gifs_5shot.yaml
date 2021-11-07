@@ -66,6 +66,8 @@ TASK_SPECIFIC:
     classifier_reg_lambda: 0.5
     context_aware_sampling: False
     synthetic_blending: 'none'
+    construct_baseset: True
+    load_baseset: False
 
 TEST:
   batch_size: 1
