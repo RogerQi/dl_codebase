@@ -89,12 +89,10 @@ class sequential_GIFS_seg_trainer(GIFS_seg_trainer):
             self.backbone_net.eval()
             self.post_processor.eval()
 
-            assert len(base_class_idx) == self.prv_post_processor.pixel_classifier.class_mat.weight.data.shape[0]
-
-            # if len(base_class_idx) != self.prv_post_processor.pixel_classifier.class_mat.weight.data.shape[0]:
-            #     # squeeze the classifier weights
-            #     print("Base IDX list and pixel classifier weight mismatched! {}".format(base_class_idx))
-            #     self.prv_post_processor.pixel_classifier.class_mat.weight.data = self.prv_post_processor.pixel_classifier.class_mat.weight.data[base_class_idx]
+            if len(base_class_idx) != self.prv_post_processor.pixel_classifier.class_mat.weight.data.shape[0]:
+                # squeeze the classifier weights
+                print("Base IDX list and pixel classifier weight mismatched! {}".format(base_class_idx))
+                self.prv_post_processor.pixel_classifier.class_mat.weight.data = self.prv_post_processor.pixel_classifier.class_mat.weight.data[base_class_idx]
 
             self.novel_adapt(base_class_idx, task, supp_img_bchw, supp_mask_bhw)
             learned_novel_class_idx += task
