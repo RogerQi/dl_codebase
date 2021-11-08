@@ -63,10 +63,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         self.partial_data_pool = {}
         self.demo_pool = {}
 
-        if self.cfg.TASK_SPECIFIC.GIFS.construct_baseset or self.cfg.TASK_SPECIFIC.GIFS.load_baseset:
-            self.base_img_candidates = self.construct_baseset()
-        else:
-            self.base_img_candidates = np.arange(0, len(self.train_set))
+        self.base_img_candidates = self.construct_baseset()
         self.base_img_candidates = np.random.choice(self.base_img_candidates, replace=False, size=(memory_bank_size,))
 
         # init a scene classification head
@@ -86,9 +83,15 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
     
     def construct_baseset(self):
         baseset_folder = f"save_{self.cfg.name}"
+        baseset_type = self.cfg.TASK_SPECIFIC.GIFS.baseset_type
         if self.cfg.TASK_SPECIFIC.GIFS.load_baseset:
-            examplar_list = torch.load(f"{baseset_folder}/examplar_list")
-        else:
+            print(f"load baseset from {baseset_folder}/examplar_list_{baseset_type}")
+            examplar_list = torch.load(f"{baseset_folder}/examplar_list_{baseset_type}")
+        elif baseset_type == 'random':
+            print(f"construct {baseset_type} baseset for {self.cfg.name}")
+            examplar_list = np.arange(0, len(self.train_set))
+        elif baseset_type in ['far', 'close', 'far_close']:
+            print(f"construct {baseset_type} baseset for {self.cfg.name}")
             self.prv_backbone_net = deepcopy(self.backbone_net)
             self.prv_post_processor = deepcopy(self.post_processor)
             
@@ -101,8 +104,17 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
             base_id_set = set(base_id_list)
 
             m = (memory_bank_size // len(base_id_list)) * 2
-            m_close = m // 2
-            m_far = m // 2
+            if 'far' in baseset_type:
+                m_far = m
+                similarity_closest_dic = {}
+                k_close = {}
+            elif 'close' in baseset_type:
+                m_close = m
+                similarity_farthest_dic = {}
+                k_far = {}
+            if baseset_type == 'far_close':
+                m_close //= 2
+                m_far //= 2
             mean_weight_dic = {}
 
             # Get the mean weight of each class
@@ -110,11 +122,6 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                 mean_weight_dic[c] = self.prv_post_processor.pixel_classifier.class_mat.weight.data[c]
                 mean_weight_dic[c] = mean_weight_dic[c].reshape((-1))
                 mean_weight_dic[c] = mean_weight_dic[c].cpu().unsqueeze(0)
-                
-            similarity_closest_dic = {}
-            k_close = {}
-            similarity_farthest_dic = {}
-            k_far = {}
 
             for c in base_id_set:
                 k_close[c] = min(m_close, len(self.train_set.dataset.get_class_map(c)))
@@ -123,7 +130,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                 similarity_farthest_dic[c] = []
             
             # Maintain a m-size heap to store the top m images of each class
-            for i in tqdm(range(len(self.train_set) // 1000)):
+            for i in tqdm(range(len(self.train_set))):
                 img, mask = self.train_set[i]
                 class_list = torch.unique(mask).tolist()
                 img_tensor = torch.stack([img]).cuda()
@@ -137,34 +144,43 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                     img_weight = img_weight.cpu().unsqueeze(0)
                     similarity = F.cosine_similarity(img_weight, mean_weight_dic[c])
                     # Update closest heap
-                    if len(similarity_closest_dic[c]) < k_close[c]:
-                        heapq.heappush(similarity_closest_dic[c], ((similarity, i)))
-                    else:
-                        heapq.heappushpop(similarity_closest_dic[c], ((similarity, i)))
+                    if 'close' in baseset_type:
+                        if len(similarity_closest_dic[c]) < k_close[c]:
+                            heapq.heappush(similarity_closest_dic[c], ((similarity, i)))
+                        else:
+                            heapq.heappushpop(similarity_closest_dic[c], ((similarity, i)))
                     # Update farthest heap
-                    if len(similarity_farthest_dic[c]) < k_far[c]:
-                        heapq.heappush(similarity_farthest_dic[c], ((-similarity, i)))
-                    else:
-                        heapq.heappushpop(similarity_farthest_dic[c], ((-similarity, i)))      
-            os.makedirs(baseset_folder)  
-            torch.save(similarity_closest_dic, f"{baseset_folder}/similarity_closest_dic")
-            torch.save(similarity_farthest_dic, f"{baseset_folder}/similarity_farthest_dic")
+                    if 'far' in baseset_type:
+                        if len(similarity_farthest_dic[c]) < k_far[c]:
+                            heapq.heappush(similarity_farthest_dic[c], ((-similarity, i)))
+                        else:
+                            heapq.heappushpop(similarity_farthest_dic[c], ((-similarity, i)))   
+            if not os.path.exists(baseset_folder):   
+                os.makedirs(baseset_folder)  
+            if 'close' in baseset_type:
+                torch.save(similarity_closest_dic, f"{baseset_folder}/similarity_closest_dic_{baseset_type}")
+            if 'far' in baseset_type:
+                torch.save(similarity_farthest_dic, f"{baseset_folder}/similarity_farthest_dic_{baseset_type}")
 
             # Combine all the top images of each class by set union
             examplar_set = set()
             for c in base_id_list:
-                close_list = similarity_closest_dic[c]
-                class_examplar_list = [i for similarity, i in close_list]
-                examplar_set = examplar_set.union(class_examplar_list)
+                if 'close' in baseset_type:
+                    close_list = similarity_closest_dic[c]
+                    class_examplar_list = [i for similarity, i in close_list]
+                    examplar_set = examplar_set.union(class_examplar_list)
 
-                far_list = similarity_farthest_dic[c]
-                class_examplar_list = [i for similarity, i in far_list]
-                examplar_set = examplar_set.union(class_examplar_list)
+                if 'far' in baseset_type:
+                    far_list = similarity_farthest_dic[c]
+                    class_examplar_list = [i for similarity, i in far_list]
+                    examplar_set = examplar_set.union(class_examplar_list)
 
             examplar_list = sorted(list(examplar_set))
-            torch.save(examplar_list, f"{baseset_folder}/examplar_list")
+            torch.save(examplar_list, f"{baseset_folder}/examplar_list_{baseset_type}")
+        else:
+            raise AssertionError('invalid baseset_type', baseset_type)
             
-        print(f"total number of examplar_set {len(examplar_list)}")
+        print(f"total number of examplar_set is {len(examplar_list)}")
         return examplar_list
     
     def test_one(self, device, num_runs=5):
