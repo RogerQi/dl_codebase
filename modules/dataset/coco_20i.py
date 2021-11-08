@@ -13,7 +13,7 @@ from .coco import COCOSeg
 COCO_PATH = os.path.join(utils.get_dataset_root(), "COCO2017")
 
 class COCO20iReader(torchvision.datasets.vision.VisionDataset):
-    def __init__(self, root, fold, base_stage, split, exclude_novel=False):
+    def __init__(self, root, fold, base_stage, split, exclude_novel=False, vanilla_label=False):
         """
         pascal_5i dataset reader
 
@@ -35,6 +35,9 @@ class COCO20iReader(torchvision.datasets.vision.VisionDataset):
         assert fold >= 0 and fold <= 3
         assert split in [True, False]
         assert base_stage
+        if vanilla_label:
+            assert exclude_novel
+        self.vanilla_label = vanilla_label
         self.base_stage = base_stage
 
         # Get augmented VOC dataset
@@ -102,7 +105,8 @@ class COCO20iReader(torchvision.datasets.vision.VisionDataset):
     def __getitem__(self, idx: int):
         assert 0 <= idx and idx < len(self.subset_idx)
         img, target_tensor = self.vanilla_ds[self.subset_idx[idx]]
-        target_tensor = self.mask_pixel(target_tensor)
+        if not self.vanilla_label:
+            target_tensor = self.mask_pixel(target_tensor)
         return img, target_tensor
 
     def mask_pixel(self, target_tensor):
@@ -180,6 +184,11 @@ class PartialCOCOReader(torchvision.datasets.vision.VisionDataset):
 def get_train_set(cfg):
     folding = cfg.DATASET.COCO20i.folding
     ds = COCO20iReader(COCO_PATH, folding, True, True, exclude_novel=True)
+    return base_set(ds, "train", cfg)
+
+def get_train_set_vanilla_label(cfg):
+    folding = cfg.DATASET.COCO20i.folding
+    ds = COCO20iReader(COCO_PATH, folding, True, True, exclude_novel=True, vanilla_label=True)
     return base_set(ds, "train", cfg)
 
 def get_val_set(cfg):
