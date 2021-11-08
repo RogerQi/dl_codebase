@@ -2,7 +2,6 @@ import os
 import random
 import time
 import numpy as np
-import heapq
 import matplotlib.pyplot as plt
 from PIL import Image
 from copy import deepcopy
@@ -16,7 +15,7 @@ import torchvision
 import torchvision.transforms.functional as tr_F
 from tqdm import tqdm, trange
 from torchvision import transforms
-
+import heapq
 from backbone.deeplabv3_renorm import BatchRenorm2d
 
 import classifier
@@ -61,7 +60,10 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         super(fs_incremental_trainer, self).__init__(cfg, backbone_net, post_processor, criterion, dataset_module, device)
         
         self.partial_data_pool = {}
+        self.blank_bank = {}
         self.demo_pool = {}
+
+        self.train_set_vanilla_label = dataset_module.get_train_set_vanilla_label(cfg)
 
         self.base_img_candidates = self.construct_baseset()
         self.base_img_candidates = np.random.choice(self.base_img_candidates, replace=False, size=(memory_bank_size,))
@@ -82,8 +84,8 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
             self.netG.eval()
     
     def construct_baseset(self):
-        baseset_folder = f"save_{self.cfg.name}"
         baseset_type = self.cfg.TASK_SPECIFIC.GIFS.baseset_type
+        baseset_folder = f"save_{self.cfg.name}"
         if self.cfg.TASK_SPECIFIC.GIFS.load_baseset:
             print(f"load baseset from {baseset_folder}/examplar_list_{baseset_type}")
             examplar_list = torch.load(f"{baseset_folder}/examplar_list_{baseset_type}")
@@ -108,7 +110,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                 m_far = m
                 similarity_closest_dic = {}
                 k_close = {}
-            elif 'close' in baseset_type:
+            if 'close' in baseset_type:
                 m_close = m
                 similarity_farthest_dic = {}
                 k_far = {}
@@ -180,7 +182,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         else:
             raise AssertionError('invalid baseset_type', baseset_type)
             
-        print(f"total number of examplar_set is {len(examplar_list)}")
+        print(f"total number of examplar_set {len(examplar_list)}")
         return examplar_list
     
     def test_one(self, device, num_runs=5):
@@ -199,7 +201,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         else:
             # Sample from complete data pool (base dataset)
             base_img_idx = np.random.choice(self.base_img_candidates)
-        syn_img_chw, syn_mask_hw = self.train_set[base_img_idx]
+        syn_img_chw, syn_mask_hw = self.train_set_vanilla_label[base_img_idx]
         # Sample from partial data pool
         # Synthesis probabilities are computed using virtual RFS
         # TODO(roger): automate this probability computation
@@ -313,7 +315,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         # Compute feature vectors for data in the pool
         self.base_pool_cos_embeddings = []
         for base_data_idx in self.base_img_candidates:
-            img_chw, _ = self.train_set[base_data_idx]
+            img_chw, _ = self.train_set_vanilla_label[base_data_idx]
             img_bchw = img_chw.view((1,) + img_chw.shape).to(self.device)
             with torch.no_grad():
                 feature_map = self.backbone_net.feature_forward(img_bchw)
