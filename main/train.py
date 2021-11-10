@@ -75,7 +75,8 @@ def main():
             
             backbone_net.load_state_dict(new_dict, strict=True)
         else:
-            backbone_net.load_state_dict(pretrained_weight_dict, strict=False)
+            # Log missing/uncompatible keys
+            print(backbone_net.load_state_dict(pretrained_weight_dict, strict=False))
 
     criterion = loss.dispatcher(cfg)
 
