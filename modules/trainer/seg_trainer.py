@@ -8,6 +8,8 @@ import utils
 
 from .trainer_base import trainer_base
 
+scaler = torch.cuda.amp.GradScaler()
+
 class seg_trainer(trainer_base):
     def __init__(self, cfg, backbone_net, post_processor, criterion, dataset_module, device):
         super(seg_trainer, self).__init__(cfg, backbone_net, post_processor, criterion, dataset_module, device)
@@ -20,13 +22,21 @@ class seg_trainer(trainer_base):
         for batch_idx, (data, target) in enumerate(self.train_loader):
             optimizer.zero_grad() # reset gradient
             data, target = data.to(device), target.to(device)
-            feature = self.backbone_net(data)
-            ori_spatial_res = data.shape[-2:]
-            output = self.post_processor(feature, ori_spatial_res)
-            loss = self.criterion(output, target)
-            loss.backward()
+            with torch.cuda.amp.autocast():
+                feature = self.backbone_net(data)
+                ori_spatial_res = data.shape[-2:]
+                output = self.post_processor(feature, ori_spatial_res)
+                loss = self.criterion(output, target)
+            if True:
+                scaler.scale(loss).backward()
+            else:
+                loss.backward()
             train_total_loss += loss.item()
-            optimizer.step()
+            if True:
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                optimizer.step()
             if batch_idx % self.cfg.TRAIN.log_interval == 0:
                 pred_map = output.max(dim = 1)[1]
                 batch_acc, _ = utils.compute_pixel_acc(pred_map, target, fg_only=self.cfg.METRIC.SEGMENTATION.fg_only)
