@@ -5,98 +5,121 @@ import torch.utils.model_zoo as model_zoo
 from torch.nn import functional as F
 from .backbone_base import backbone_base
 
-class BatchRenorm(torch.jit.ScriptModule):
-    def __init__(
-        self,
-        num_features: int,
-        eps: float = 1e-3,
-        momentum: float = 0.01,
-        affine: bool = True,
-    ):
-        super().__init__()
-        self.register_buffer(
-            "running_mean", torch.zeros(num_features, dtype=torch.float)
-        )
-        self.register_buffer(
-            "running_std", torch.ones(num_features, dtype=torch.float)
-        )
-        self.register_buffer(
-            "num_batches_tracked", torch.tensor(0, dtype=torch.long)
-        )
-        self.weight = torch.nn.Parameter(
-            torch.ones(num_features, dtype=torch.float)
-        )
-        self.bias = torch.nn.Parameter(
-            torch.zeros(num_features, dtype=torch.float)
-        )
+import torch
+import torch.nn as nn
+import torch.nn.functional as functional
+import torch.distributed as distributed
+
+
+class ABR(nn.Module):
+    """Activated Batch Renormalization
+
+    This gathers a BatchNorm and an activation function in a single module
+    Adapted from https://arxiv.org/pdf/1702.03275.pdf
+
+    Parameters
+    ----------
+    num_features : int
+        Number of feature channels in the input and output.
+    eps : float
+        Small constant to prevent numerical issues.
+    momentum : float
+        Momentum factor applied to compute running statistics.
+    affine : bool
+        If `True` apply learned scale and shift transformation after normalization.
+    activation : str
+        Name of the activation functions, one of: `relu`, `leaky_relu`, `elu` or `identity`.
+    activation_param : float
+        Negative slope for the `leaky_relu` activation.
+    """
+    def __init__(self, num_features, momentum=0.05, eps=1e-5, affine=True, activation="identity",
+                 activation_param=0.01, group=distributed.group.WORLD, renorm=True):
+        super(ABR, self).__init__()
+        self.num_features = num_features
         self.affine = affine
         self.eps = eps
-        self.step = 0
+        self.momentum = momentum
+        self.activation = activation
+        self.activation_param = activation_param
+        if self.affine:
+            self.weight = nn.Parameter(torch.ones(num_features))
+            self.bias = nn.Parameter(torch.zeros(num_features))
+        else:
+            self.register_parameter('weight', None)
+            self.register_parameter('bias', None)
+        self.register_buffer('running_mean', torch.zeros(num_features))
+        self.register_buffer('running_var', torch.ones(num_features))
+        self.reset_parameters()
+
+        self.group = group
+
+        self.renorm = renorm
         self.momentum = momentum
 
-    def _check_input_dim(self, x: torch.Tensor) -> None:
-        raise NotImplementedError()  # pragma: no cover
-
-    @property
-    def rmax(self) -> torch.Tensor:
-        return (2 / 35000 * self.num_batches_tracked + 25 / 35).clamp_(
-            1.0, 3.0
-        )
-
-    @property
-    def dmax(self) -> torch.Tensor:
-        return (5 / 20000 * self.num_batches_tracked - 25 / 20).clamp_(
-            0.0, 5.0
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        self._check_input_dim(x)
-        if x.dim() > 2:
-            x = x.transpose(1, -1)
-        if self.training:
-            dims = [i for i in range(x.dim() - 1)]
-            batch_mean = x.mean(dims)
-            batch_std = x.std(dims, unbiased=False) + self.eps
-            r = (
-                batch_std.detach() / self.running_std.view_as(batch_std)
-            ).clamp_(1 / self.rmax, self.rmax)
-            d = (
-                (batch_mean.detach() - self.running_mean.view_as(batch_mean))
-                / self.running_std.view_as(batch_std)
-            ).clamp_(-self.dmax, self.dmax)
-            x = (x - batch_mean) / batch_std * r + d
-            self.running_mean += self.momentum * (
-                batch_mean.detach() - self.running_mean
-            )
-            self.running_std += self.momentum * (
-                batch_std.detach() - self.running_std
-            )
-            self.num_batches_tracked += 1
-        else:
-            x = (x - self.running_mean) / self.running_std
+    def reset_parameters(self):
+        nn.init.constant_(self.running_mean, 0)
+        nn.init.constant_(self.running_var, 1)
         if self.affine:
-            x = self.weight * x + self.bias
-        if x.dim() > 2:
-            x = x.transpose(1, -1)
-        return x
+            nn.init.constant_(self.weight, 1)
+            nn.init.constant_(self.bias, 0)
 
+    def forward(self, x):
+        if not self.renorm or not self.training:  # if eval, don't renorm
+            weight = self.weight
+            bias = self.bias
+        else:
+            with torch.no_grad():
+                running_std = (self.running_var + self.eps).pow(0.5)
+                xt = x.transpose(1, 0).reshape(x.shape[1], -1)
+                r = (xt.var(dim=1) + self.eps).pow(0.5) / running_std
+                d = (xt.mean(dim=1) - self.running_mean) / running_std
+            weight = self.weight * r
+            bias = self.bias + self.weight * d
 
-class BatchRenorm1d(BatchRenorm):
-    def _check_input_dim(self, x: torch.Tensor) -> None:
-        if x.dim() not in [2, 3]:
-            raise ValueError("expected 2D or 3D input (got {x.dim()}D input)")
+        x = functional.batch_norm(x, self.running_mean, self.running_var, weight, bias,
+                                  self.training, self.momentum, self.eps)
 
+        if self.activation == "relu":
+            return functional.relu(x, inplace=True)
+        elif self.activation == "leaky_relu":
+            return functional.leaky_relu(x, negative_slope=self.activation_param, inplace=True)
+        elif self.activation == "elu":
+            return functional.elu(x, alpha=self.activation_param, inplace=True)
+        elif self.activation == "identity":
+            return x
+        else:
+            raise RuntimeError("Unknown activation function {}".format(self.activation))
 
-class BatchRenorm2d(BatchRenorm):
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys,
+                              error_msgs):
+        # Post-Pytorch 1.0 models using standard BatchNorm have a "num_batches_tracked" parameter that we need to ignore
+        num_batches_tracked_key = prefix + "num_batches_tracked"
+        if num_batches_tracked_key in state_dict:
+            del state_dict[num_batches_tracked_key]
+
+        super(ABR, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict, missing_keys,
+                                               error_msgs, unexpected_keys)
+
+    def extra_repr(self):
+        rep = '{num_features}, eps={eps}, momentum={momentum}, affine={affine}, activation={activation}'
+        if self.activation in ["leaky_relu", "elu"]:
+            rep += '[{activation_param}]'
+        return rep.format(**self.__dict__)
+
+# class BatchRenorm1d(ABR):
+#     def _check_input_dim(self, x: torch.Tensor) -> None:
+#         if x.dim() not in [2, 3]:
+#             raise ValueError("expected 2D or 3D input (got {x.dim()}D input)")
+
+class BatchRenorm2d(ABR):
     def _check_input_dim(self, x: torch.Tensor) -> None:
         if x.dim() != 4:
             raise ValueError("expected 4D input (got {x.dim()}D input)")
 
-
-class BatchRenorm3d(BatchRenorm):
-    def _check_input_dim(self, x: torch.Tensor) -> None:
-        if x.dim() != 5:
-            raise ValueError("expected 5D input (got {x.dim()}D input)")
+# class BatchRenorm3d(ABR):
+#     def _check_input_dim(self, x: torch.Tensor) -> None:
+#         if x.dim() != 5:
+#             raise ValueError("expected 5D input (got {x.dim()}D input)")
 
 class Conv2d(nn.Conv2d):
 
