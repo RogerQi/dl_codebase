@@ -65,9 +65,6 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
 
         self.train_set_vanilla_label = dataset_module.get_train_set_vanilla_label(cfg)
 
-        self.base_img_candidates = self.construct_baseset()
-        self.base_img_candidates = np.random.choice(self.base_img_candidates, replace=False, size=(memory_bank_size,))
-
         # init a scene classification head
         self.scene_classifier = scene_clf_head(2048, 365).to(self.device) # 365 classes
 
@@ -184,10 +181,11 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         else:
             raise AssertionError('invalid baseset_type', baseset_type)
             
-        print(f"total number of examplar_set {len(examplar_list)}")
-        return examplar_list
+        print(f"total number of examplar_list {len(examplar_list)}")
+        return np.random.choice(examplar_list, replace=False, size=(memory_bank_size,))
     
     def test_one(self, device, num_runs=5):
+        self.base_img_candidates = self.construct_baseset()
         if self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling:
             self.scene_model_setup()
         sequential_GIFS_seg_trainer.test_one(self, device, num_runs)
