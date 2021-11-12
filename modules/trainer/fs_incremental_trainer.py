@@ -80,16 +80,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         self.scene_classifier = scene_clf_head(2048, 365).to(self.device) # 365 classes
 
         self.scene_classifier_trained = False
-        assert self.cfg.TASK_SPECIFIC.GIFS.synthetic_blending in ('none', 'harmonization', 'gaussian')
         self.loaded_weight_path = None
-
-        if self.cfg.TASK_SPECIFIC.GIFS.synthetic_blending == 'harmonization':
-            # Image harmonization
-            # Credit: https://arxiv.org/abs/1911.13239
-            torchscript_path = '/data/pretrained_model/DoveNet.pt'
-            self.netG = torch.jit.load(torchscript_path)
-            self.netG = self.netG.to(torch.device('cuda'))
-            self.netG.eval()
     
     def construct_baseset(self):
         baseset_type = self.cfg.TASK_SPECIFIC.GIFS.baseset_type
@@ -356,39 +347,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         img_chw = base_img_chw
         mask_hw = base_mask_hw
 
-        if self.cfg.TASK_SPECIFIC.GIFS.synthetic_blending == 'harmonization':
-            img_chw = self.harmonize_image(img_chw, (mask_hw == mask_id))
-
         return (img_chw, mask_hw)
-    
-    def harmonize_image(self, image_tensor, mask_tensor):
-        # Unnormalize image to torch.float32 between 0-1
-        rgb_mean = self.cfg.DATASET.TRANSFORM.TEST.TRANSFORMS_DETAILS.NORMALIZE.mean
-        rgb_sd = self.cfg.DATASET.TRANSFORM.TEST.TRANSFORMS_DETAILS.NORMALIZE.sd
-        rgb_mean = torch.tensor(rgb_mean).view((3, 1, 1))
-        rgb_sd = torch.tensor(rgb_sd).view((3, 1, 1))
-        image_tensor = (image_tensor * rgb_sd) + rgb_mean
-        image_tensor[image_tensor < 0] = 0
-        image_tensor[image_tensor > 1] = 1
-        # Normalize image using 0.5 mean and 0.5 std
-        normalize_func = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-        image_tensor = normalize_func(image_tensor) # CHW
-        # Mask is binary in 0/1 but is float
-        mask_tensor = mask_tensor.to(torch.float32)
-        mask_tensor = mask_tensor.view((1,) + mask_tensor.shape) # 1HW
-        # Pad input
-        inputs = torch.cat([image_tensor, mask_tensor]) # 4HW
-        inputs = inputs.view((1,) + inputs.shape) # 14HW
-        # Harmonize
-        with torch.no_grad():
-            output = self.netG(inputs.cuda()) # 13HW, -1~1
-        # Normalize it back to 0-1 and then to custom mean sd...
-        output = (output + 1) / 2
-        my_normalize = transforms.Normalize(mean=self.cfg.DATASET.TRANSFORM.TEST.TRANSFORMS_DETAILS.NORMALIZE.mean,
-                                    std=self.cfg.DATASET.TRANSFORM.TEST.TRANSFORMS_DETAILS.NORMALIZE.sd)
-        output = my_normalize(output)
-        assert output.shape[0] == 1
-        return output[0].cpu()
 
     def finetune_backbone(self, base_class_idx, novel_class_idx, supp_img_bchw, supp_mask_bhw):
         assert self.prv_backbone_net is not None

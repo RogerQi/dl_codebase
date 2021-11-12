@@ -67,7 +67,6 @@ TASK_SPECIFIC:
     feature_reg_lambda: 0.5
     classifier_reg_lambda: 0.1
     context_aware_sampling: False
-    synthetic_blending: 'none'
     sequential_dataset_num_classes: 5
     baseset_type: 'far_close'
     load_baseset: False

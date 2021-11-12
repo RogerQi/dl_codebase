@@ -65,7 +65,6 @@ TASK_SPECIFIC:
     feature_reg_lambda: 1.5
     classifier_reg_lambda: 0.5
     context_aware_sampling: False
-    synthetic_blending: 'none'
     baseset_type: 'far_close'
     load_baseset: False
 
