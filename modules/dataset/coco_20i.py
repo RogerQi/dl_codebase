@@ -219,6 +219,8 @@ def get_continual_test_set(cfg):
     return base_set(ds, "test", cfg)
 
 def get_sequential_continual_test_set(cfg):
+    # TODO: support other splits/sequential testing size
+    # 5 classes per step
     exclusion_label_list = [i for i in range(61, 81)]
     all_ds_list = []
     for i in [61, 66, 71, 76]:

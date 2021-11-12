@@ -53,6 +53,17 @@ class scene_clf_head(nn.Module):
 def harmonic_mean(base_iou, novel_iou):
     return 2 / (1. / base_iou + 1. / novel_iou)
 
+class kd_criterion(nn.Module):
+    def __init__(self):
+        super().__init__()
+    
+    def forward(self, x_pred, x_ref):
+        # x_pred and x_ref are unnormalized
+        x_pred = F.softmax(x_pred, dim=1)
+        x_ref = F.softmax(x_ref, dim=1)
+        element_wise_loss = x_ref * torch.log(x_pred)
+        return -torch.mean(element_wise_loss)
+
 memory_bank_size = 500
 
 class fs_incremental_trainer(sequential_GIFS_seg_trainer):
@@ -89,7 +100,8 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         sequential_GIFS_seg_trainer.test_one(self, device, num_runs)
     
     def synthesizer_sample(self, novel_obj_id):
-        num_existing_objects = num_novel_objects = 2
+        num_existing_objects = 2
+        num_novel_objects = 2
         # Sample an image from base memory bank
         if self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling:
             if torch.rand(1) < 0.5:
@@ -103,7 +115,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         # Sample from partial data pool
         # Synthesis probabilities are computed using virtual RFS
         # TODO(roger): automate this probability computation
-        if len(self.partial_data_pool) > 1 and torch.rand(1) < 0.5568: # VOC: 0.5568 COCO: 0.5124
+        if len(self.partial_data_pool) > 1 and torch.rand(1) < 0.5124: # VOC: 0.5568 COCO: 0.5124
             # select an old class
             candidate_classes = [c for c in self.partial_data_pool.keys() if c != novel_obj_id]
             for i in range(num_existing_objects):
@@ -112,7 +124,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                 img_chw, mask_hw = selected_sample
                 syn_img_chw, syn_mask_hw = self.copy_and_paste(img_chw, mask_hw, syn_img_chw, syn_mask_hw, selected_class)
 
-        if torch.rand(1) < 0.7424: # VOC: 0.7424 COCO: 0.6832
+        if torch.rand(1) < 0.6832: # VOC: 0.7424 COCO: 0.6832
             for i in range(num_novel_objects):
                 selected_sample = random.choice(self.partial_data_pool[novel_obj_id])
                 img_chw, mask_hw = selected_sample
@@ -123,7 +135,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
     def init_scene_training(self):
         # init scene dataset and loader. The default loader is segmentation dataset
         import dataset.places365_stanford as places365
-        self.scene_train_set = places365.Places365StanfordReader(utils.get_dataset_root(), False)
+        self.scene_train_set = places365.Places365StanfordReader(utils.get_dataset_root(), True)
         self.scene_train_set = utils.dataset_normalization_wrapper(self.cfg, self.scene_train_set)
         self.scene_train_loader = torch.utils.data.DataLoader(self.scene_train_set, batch_size=16, shuffle=True, **self.loader_kwargs)
         # define my own optimizer
@@ -149,7 +161,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
             loss.backward()
             train_total_loss += loss.item()
             self.scene_optimizer.step()
-            if batch_idx % 200 == 0:
+            if batch_idx % 5000 == 0:
                 pred = output.argmax(dim = 1, keepdim = True)
                 correct_prediction = pred.eq(target.view_as(pred)).sum().item()
                 batch_acc = correct_prediction / data.shape[0]
@@ -161,7 +173,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         
         return train_total_loss / len(self.train_loader), total_correct / total_size
     
-    def train_scene_model(self, max_epoch=10):
+    def train_scene_model(self, max_epoch=5):
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.scene_optimizer, max_epoch)
         for epoch in range(1, max_epoch):
             start_cp = time.time()
@@ -347,13 +359,15 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         ]
 
         # Freeze batch norm statistics
+        cnt = 0
         for module in self.backbone_net.modules():
             if isinstance(module, nn.BatchNorm2d) or isinstance(module, BatchRenorm2d):
-                if hasattr(module, 'weight'):
-                    module.weight.requires_grad_(False)
-                if hasattr(module, 'bias'):
-                    module.bias.requires_grad_(False)
+                module.weight.requires_grad_(False)
+                module.bias.requires_grad_(False)
                 module.eval()
+                cnt += 1
+        
+        print("Froze {} BN/BRN layers".format(cnt))
 
         optimizer = optim.SGD(trainable_params, lr = self.cfg.TASK_SPECIFIC.GIFS.backbone_lr, momentum = 0.9)
         
@@ -365,16 +379,32 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, polynomial_schedule)
 
         l2_criterion = nn.MSELoss()
+        my_kd_criterion = kd_criterion()
+
+        # Save vanilla self.post_processor (after MAP) for prototype distillation
+        post_processor_distillation_ref = deepcopy(self.post_processor)
 
         with trange(1, max_iter + 1, dynamic_ncols=True) as t:
             for iter_i in t:
                 image_list = []
                 mask_list = []
                 for _ in range(batch_size):
-                    novel_obj_id = random.choice(novel_class_idx)
-                    img_chw, mask_hw = self.synthesizer_sample(novel_obj_id)
-                    image_list.append(img_chw)
-                    mask_list.append(mask_hw)
+                    if True:
+                        # synthesis
+                        novel_obj_id = random.choice(novel_class_idx)
+                        img_chw, mask_hw = self.synthesizer_sample(novel_obj_id)
+                        image_list.append(img_chw)
+                        mask_list.append(mask_hw)
+                    else:
+                        # full mask
+                        idx = np.random.randint(supp_img_bchw.shape[0])
+                        img_chw = supp_img_bchw[idx]
+                        mask_hw = supp_mask_bhw[idx]
+                        if torch.rand(1) < 0.5:
+                            img_chw = tr_F.hflip(img_chw)
+                            mask_hw = tr_F.hflip(mask_hw)
+                        image_list.append(img_chw)
+                        mask_list.append(mask_hw)
                 data_bchw = torch.stack(image_list).cuda()
                 target_bhw = torch.stack(mask_list).cuda()
                 feature = self.backbone_net(data_bchw)
@@ -387,13 +417,13 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                     ori_feature = self.prv_backbone_net(data_bchw)
                     ori_logit = self.prv_post_processor(ori_feature, ori_spatial_res, scale_factor=10)
 
-                if self.cfg.TASK_SPECIFIC.GIFS.pseudo_base_label:
-                    novel_mask = torch.zeros_like(target_bhw)
-                    for novel_idx in novel_class_idx:
-                        novel_mask = torch.logical_or(novel_mask, target_bhw == novel_idx)
-                    tmp_target_bhw = output.max(dim = 1)[1]
-                    tmp_target_bhw[novel_mask] = target_bhw[novel_mask]
-                    target_bhw = tmp_target_bhw
+                # if self.cfg.TASK_SPECIFIC.GIFS.pseudo_base_label:
+                #     novel_mask = torch.zeros_like(target_bhw)
+                #     for novel_idx in novel_class_idx:
+                #         novel_mask = torch.logical_or(novel_mask, target_bhw == novel_idx)
+                #     tmp_target_bhw = output.max(dim = 1)[1]
+                #     tmp_target_bhw[novel_mask] = target_bhw[novel_mask]
+                #     target_bhw = tmp_target_bhw
 
                 loss = self.criterion(output, target_bhw)
 
@@ -403,10 +433,13 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                 loss = loss + regularization_loss
                 # L2 regulalrization on base classes
                 if False:
+                    with torch.no_grad():
+                        distill_output = post_processor_distillation_ref(ori_feature, ori_spatial_res, scale_factor=10)
+                    clf_loss = my_kd_criterion(output, distill_output) * self.cfg.TASK_SPECIFIC.GIFS.classifier_reg_lambda
                     # regularization on weights itself
-                    vanilla_classifier_weights = self.vanilla_post_processor.pixel_classifier.class_mat.weight.data
-                    new_classifier_weights = self.post_processor.pixel_classifier.class_mat.weight.data[self.vanilla_base_class_idx]
-                    clf_loss = l2_criterion(new_classifier_weights, vanilla_classifier_weights) * self.cfg.TASK_SPECIFIC.GIFS.classifier_reg_lambda
+                    # vanilla_classifier_weights = self.vanilla_post_processor.pixel_classifier.class_mat.weight.data
+                    # new_classifier_weights = self.post_processor.pixel_classifier.class_mat.weight.data[self.vanilla_base_class_idx]
+                    # clf_loss = l2_criterion(new_classifier_weights, vanilla_classifier_weights) * self.cfg.TASK_SPECIFIC.GIFS.classifier_reg_lambda
                 else:
                     # regularization on output logits
                     clf_loss = l2_criterion(output[:,base_class_idx,:,:], ori_logit) * self.cfg.TASK_SPECIFIC.GIFS.classifier_reg_lambda
