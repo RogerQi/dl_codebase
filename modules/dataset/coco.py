@@ -76,6 +76,7 @@ class COCOSeg(datasets.vision.VisionDataset):
         for c in range(1, 81):
             instance_class_map[c] = []
 
+        print("Pre-processing COCO THING semantic segmentation masks...")
         for i in trange(len(self)):
             img_id = self.img_ids[i]
             mask = self._get_mask(img_id)
