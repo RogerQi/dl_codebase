@@ -98,7 +98,7 @@ class sequential_GIFS_seg_trainer(GIFS_seg_trainer):
             learned_novel_class_idx += task
 
             # Evaluation
-            if i == len(all_novel_class_idx) - 1:
+            if i == len(task_stream) - 1:
                 classwise_iou = self.eval_on_loader(self.test_loader_list[i], total_num_classes)
 
                 classwise_iou = np.array(classwise_iou)

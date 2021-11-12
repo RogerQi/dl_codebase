@@ -170,6 +170,9 @@ _C.TASK_SPECIFIC.GIFS.classifier_reg_lambda = 0.1
 _C.TASK_SPECIFIC.GIFS.context_aware_sampling = False
 _C.TASK_SPECIFIC.GIFS.synthetic_blending = 'none' # ('none', 'harmonization', 'gaussian')
 _C.TASK_SPECIFIC.GIFS.sequential_dataset_num_classes = 1
+_C.TASK_SPECIFIC.GIFS.baseset_type = 'random' # ('random', 'far', 'close', 'far_close')
+_C.TASK_SPECIFIC.GIFS.load_baseset = False
+
 
 # ---------------------------
 # | End Default Config

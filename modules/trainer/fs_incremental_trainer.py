@@ -15,7 +15,7 @@ import torchvision
 import torchvision.transforms.functional as tr_F
 from tqdm import tqdm, trange
 from torchvision import transforms
-
+import heapq
 from backbone.deeplabv3_renorm import BatchRenorm2d
 
 import classifier
@@ -76,9 +76,6 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
 
         self.train_set_vanilla_label = dataset_module.get_train_set_vanilla_label(cfg)
 
-        self.base_img_candidates = np.arange(0, len(self.train_set_vanilla_label))
-        self.base_img_candidates = np.random.choice(self.base_img_candidates, replace=False, size=(memory_bank_size,))
-
         # init a scene classification head
         self.scene_classifier = scene_clf_head(2048, 365).to(self.device) # 365 classes
 
@@ -94,7 +91,112 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
             self.netG = self.netG.to(torch.device('cuda'))
             self.netG.eval()
     
+    def construct_baseset(self):
+        baseset_type = self.cfg.TASK_SPECIFIC.GIFS.baseset_type
+        baseset_folder = f"save_{self.cfg.name}"
+        if self.cfg.TASK_SPECIFIC.GIFS.load_baseset:
+            print(f"load baseset from {baseset_folder}/examplar_list_{baseset_type}")
+            examplar_list = torch.load(f"{baseset_folder}/examplar_list_{baseset_type}")
+        elif baseset_type == 'random':
+            print(f"construct {baseset_type} baseset for {self.cfg.name}")
+            examplar_list = np.arange(0, len(self.train_set_vanilla_label))
+        elif baseset_type in ['far', 'close', 'far_close']:
+            print(f"construct {baseset_type} baseset for {self.cfg.name}")
+            self.prv_backbone_net = deepcopy(self.backbone_net)
+            self.prv_post_processor = deepcopy(self.post_processor)
+            
+            self.prv_backbone_net.eval()
+            self.prv_post_processor.eval()
+
+            base_id_list = self.train_set_vanilla_label.dataset.get_label_range()
+
+            print(f"self.base_id_list contains {base_id_list}")
+            base_id_set = set(base_id_list)
+
+            m = (memory_bank_size // len(base_id_list)) * 2
+            if 'far' in baseset_type:
+                m_far = m
+                similarity_farthest_dic = {}
+                k_far = {}
+            if 'close' in baseset_type:
+                m_close = m
+                similarity_closest_dic = {}
+                k_close = {}
+            if baseset_type == 'far_close':
+                m_close //= 2
+                m_far //= 2
+            mean_weight_dic = {}
+
+            # Get the mean weight of each class
+            for c in base_id_list:
+                mean_weight_dic[c] = self.prv_post_processor.pixel_classifier.class_mat.weight.data[c]
+                mean_weight_dic[c] = mean_weight_dic[c].reshape((-1))
+                mean_weight_dic[c] = mean_weight_dic[c].cpu().unsqueeze(0)
+
+            for c in base_id_set:
+                if 'far' in baseset_type:
+                    k_far[c] = min(m_far, len(self.train_set_vanilla_label.dataset.get_class_map(c)))
+                    similarity_farthest_dic[c] = []
+                if 'close' in baseset_type:
+                    k_close[c] = min(m_close, len(self.train_set_vanilla_label.dataset.get_class_map(c)))
+                    similarity_closest_dic[c] = []
+                    
+            # Maintain a m-size heap to store the top m images of each class
+            for i in tqdm(range(len(self.train_set_vanilla_label))):
+                img, mask = self.train_set_vanilla_label[i]
+                class_list = torch.unique(mask).tolist()
+                img_tensor = torch.stack([img]).cuda()
+                mask_tensor = torch.stack([mask]).cuda()
+                for c in class_list:
+                    if c not in base_id_set:
+                        continue
+                    with torch.no_grad():
+                        img_feature = self.prv_backbone_net(img_tensor)
+                        img_weight = utils.masked_average_pooling(mask_tensor == c, img_feature, True)
+                    img_weight = img_weight.cpu().unsqueeze(0)
+                    similarity = F.cosine_similarity(img_weight, mean_weight_dic[c])
+                    # Update closest heap
+                    if 'close' in baseset_type:
+                        if len(similarity_closest_dic[c]) < k_close[c]:
+                            heapq.heappush(similarity_closest_dic[c], ((similarity, i)))
+                        else:
+                            heapq.heappushpop(similarity_closest_dic[c], ((similarity, i)))
+                    # Update farthest heap
+                    if 'far' in baseset_type:
+                        if len(similarity_farthest_dic[c]) < k_far[c]:
+                            heapq.heappush(similarity_farthest_dic[c], ((-similarity, i)))
+                        else:
+                            heapq.heappushpop(similarity_farthest_dic[c], ((-similarity, i)))   
+            if not os.path.exists(baseset_folder):   
+                os.makedirs(baseset_folder)  
+            if 'close' in baseset_type:
+                torch.save(similarity_closest_dic, f"{baseset_folder}/similarity_closest_dic_{baseset_type}")
+            if 'far' in baseset_type:
+                torch.save(similarity_farthest_dic, f"{baseset_folder}/similarity_farthest_dic_{baseset_type}")
+
+            # Combine all the top images of each class by set union
+            examplar_set = set()
+            for c in base_id_list:
+                if 'close' in baseset_type:
+                    close_list = similarity_closest_dic[c]
+                    class_examplar_list = [i for similarity, i in close_list]
+                    examplar_set = examplar_set.union(class_examplar_list)
+
+                if 'far' in baseset_type:
+                    far_list = similarity_farthest_dic[c]
+                    class_examplar_list = [i for similarity, i in far_list]
+                    examplar_set = examplar_set.union(class_examplar_list)
+
+            examplar_list = sorted(list(examplar_set))
+            torch.save(examplar_list, f"{baseset_folder}/examplar_list_{baseset_type}")
+        else:
+            raise AssertionError('invalid baseset_type', baseset_type)
+            
+        print(f"total number of examplar_list {len(examplar_list)}")
+        return np.random.choice(examplar_list, replace=False, size=(memory_bank_size,))
+    
     def test_one(self, device, num_runs=5):
+        self.base_img_candidates = self.construct_baseset()
         if self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling:
             self.scene_model_setup()
         sequential_GIFS_seg_trainer.test_one(self, device, num_runs)
