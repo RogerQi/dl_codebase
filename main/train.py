@@ -120,7 +120,7 @@ def main():
     if args.resume != "NA":
         sub_str = args.resume[args.resume.index('epoch') + 5:]
         start_epoch = int(sub_str[:sub_str.index('_')]) + 1
-        assert start_epoch < cfg.TRAIN.max_epochs
+        assert start_epoch <= cfg.TRAIN.max_epochs
         print("Resuming training from epoch {}".format(start_epoch))
         my_trainer.load_model(args.resume)
 

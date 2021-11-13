@@ -85,10 +85,7 @@ class COCOSeg(datasets.vision.VisionDataset):
                 c = int(c)
                 if c == 0 or c == -1:
                     continue # background or ignore_mask
-                instance_class_map[c].append(str(i))
-            serialized_path = os.path.join(mask_dir, '{}.npy'.format(img_id))
-            with open(serialized_path, 'wb') as f:
-                np.save(f, mask.numpy())
+                instance_class_map[c].append(str(i)) # use string to format integer to write to txt
         
         for c in range(1, 81):
             with open(os.path.join(class_map_dir, str(c) + '.txt'), 'w') as f:
@@ -109,9 +106,8 @@ class COCOSeg(datasets.vision.VisionDataset):
     def __getitem__(self, idx: int):
         img_id = self.img_ids[idx]
         img = self._get_img(img_id)
-        mask_path = os.path.join(self.mask_dir, '{}.npy'.format(img_id))
-        seg_mask = np.load(mask_path)
-        return (img, torch.tensor(seg_mask))
+        seg_mask = self._get_mask(img_id) # tensor
+        return (img, seg_mask)
     
     def _gen_seg_mask(self, annotations, h, w):
         seg_mask = torch.zeros((h, w), dtype=torch.int64)
