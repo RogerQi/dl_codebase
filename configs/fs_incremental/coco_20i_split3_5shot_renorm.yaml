@@ -46,7 +46,7 @@ DATASET:
 
 TRAIN:
   max_epochs: 20
-  batch_size: 16
+  batch_size: 32
   initial_lr: 0.007
   lr_scheduler: "polynomial"
   log_interval: 200

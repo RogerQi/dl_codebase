@@ -1,8 +1,8 @@
-name: 'GIFS_coco20i_split0_renorm'
+name: 'GIFS_pascal_voc_split0'
 task: 'few_shot_incremental'
 input_dim: (3, 512, 512)
-num_classes: 61
-meta_training_num_classes: 61 # (15 annotated class in splitted training set + 1 background)
+num_classes: 16
+meta_training_num_classes: 16 # (15 annotated class in splitted training set + 1 background)
 meta_testing_num_classes: 2
 save_model: True
 
@@ -11,7 +11,7 @@ SYSTEM:
   num_workers: 16
 
 BACKBONE:
-  network: 'deeplabv3_resnet101_renorm'
+  network: 'deeplabv3_resnet101'
   pooling: False
   use_pretrained: True
   pretrained_path: "/data/pretrained_model/resnet101-5d3b4d8f.pth"
@@ -23,8 +23,8 @@ LOSS:
   loss: 'semantic_nllloss'
 
 DATASET:
-  dataset: 'coco_20i'
-  COCO20i:
+  dataset: 'pascal_5i'
+  PASCAL5i:
     folding: 0
   TRANSFORM:
     TRAIN:
@@ -45,11 +45,14 @@ DATASET:
         crop_size: (512, 512)
 
 TRAIN:
-  max_epochs: 20
-  batch_size: 32
+  max_epochs: 5
+  lr_max_epoch: 10
+  batch_size: 24
   initial_lr: 0.007
   lr_scheduler: "polynomial"
-  log_interval: 200
+  step_down_gamma: 0.1
+  step_down_on_epoch: [50, 80]
+  log_interval: 20
   OPTIMIZER:
     type: "SGD"
     momentum: 0.9
@@ -59,17 +62,14 @@ TASK_SPECIFIC:
   GIFS:
     fine_tuning: True
     pseudo_base_label: False
-    max_iter: 400
+    max_iter: 200
     num_shots: 5
-    ft_batch_size: 10
+    ft_batch_size: 5
     backbone_lr: 1e-3
     classifier_lr: 1e-2
-    feature_reg_lambda: 0.5
-    classifier_reg_lambda: 0.1
-    context_aware_sampling: False
-    sequential_dataset_num_classes: 5
-    baseset_type: 'far_close'
-    load_baseset: False
+    feature_reg_lambda: 0.1
+    classifier_reg_lambda: 0.0
+    context_aware_sampling: True
 
 TEST:
   batch_size: 1

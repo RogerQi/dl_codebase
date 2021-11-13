@@ -1,4 +1,4 @@
-name: 'GIFS_pascal_voc'
+name: 'GIFS_pascal_voc_split3'
 task: 'few_shot_incremental'
 input_dim: (3, 512, 512)
 num_classes: 16
