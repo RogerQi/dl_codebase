@@ -46,7 +46,7 @@ DATASET:
 
 TRAIN:
   max_epochs: 20
-  batch_size: 16
+  batch_size: 32
   initial_lr: 0.007
   lr_scheduler: "polynomial"
   log_interval: 200
@@ -59,15 +59,17 @@ TASK_SPECIFIC:
   GIFS:
     fine_tuning: True
     pseudo_base_label: False
-    max_iter: 400
+    max_iter: 2000
     num_shots: 5
     ft_batch_size: 10
     backbone_lr: 1e-3
     classifier_lr: 1e-2
-    feature_reg_lambda: 0.5
-    classifier_reg_lambda: 0.1
+    feature_reg_lambda: 0.0
+    classifier_reg_lambda: 10.0
     context_aware_sampling: False
     sequential_dataset_num_classes: 5
+    baseset_type: 'far_close'
+    load_baseset: False
 
 TEST:
   batch_size: 1

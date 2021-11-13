@@ -2,7 +2,7 @@ name: 'places365_vggnet16_cos'
 task: 'classification'
 input_dim: (3, 224, 224)
 num_classes: 365
-save_model: False
+save_model: True
 
 SYSTEM:
   use_cpu: False

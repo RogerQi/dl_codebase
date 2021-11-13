@@ -68,6 +68,8 @@ TASK_SPECIFIC:
     classifier_reg_lambda: 0.1
     context_aware_sampling: False
     sequential_dataset_num_classes: 5
+    baseset_type: 'far_close'
+    load_baseset: False
 
 TEST:
   batch_size: 1
