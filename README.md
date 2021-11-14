@@ -36,4 +36,4 @@ TODOs
     - Batch random resizing augmentation
     - encoder/decoder design
     - deep supervision
-
+- Extend yaml reading to support inheriting from another YAML file
