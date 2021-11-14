@@ -6,7 +6,6 @@ import matplotlib.pyplot as plt
 from PIL import Image
 from copy import deepcopy
 import cv2
-from numpy.core.defchararray import replace
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -187,6 +186,8 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         return np.random.choice(examplar_list, replace=False, size=(memory_bank_size,))
     
     def test_one(self, device, num_runs=5):
+        if self.cfg.TASK_SPECIFIC.GIFS.num_runs != -1:
+            num_runs = self.cfg.TASK_SPECIFIC.GIFS.num_runs
         self.base_img_candidates = self.construct_baseset()
         if self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling:
             self.scene_model_setup()
@@ -208,7 +209,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         # Sample from partial data pool
         # Synthesis probabilities are computed using virtual RFS
         # TODO(roger): automate this probability computation
-        if len(self.partial_data_pool) > 1 and torch.rand(1) < 0.5124: # VOC: 0.5568 COCO: 0.5124
+        if len(self.partial_data_pool) > 1 and torch.rand(1) < 0.5568: # VOC: 0.5568 COCO: 0.5124
             # select an old class
             candidate_classes = [c for c in self.partial_data_pool.keys() if c != novel_obj_id]
             for i in range(num_existing_objects):
@@ -217,7 +218,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                 img_chw, mask_hw = selected_sample
                 syn_img_chw, syn_mask_hw = self.copy_and_paste(img_chw, mask_hw, syn_img_chw, syn_mask_hw, selected_class)
 
-        if torch.rand(1) < 0.6832: # VOC: 0.7424 COCO: 0.6832
+        if torch.rand(1) < 0.7424: # VOC: 0.7424 COCO: 0.6832
             for i in range(num_novel_objects):
                 selected_sample = random.choice(self.partial_data_pool[novel_obj_id])
                 img_chw, mask_hw = selected_sample
@@ -493,7 +494,8 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                 regularization_loss = regularization_loss * self.cfg.TASK_SPECIFIC.GIFS.feature_reg_lambda # hyperparameter lambda
                 loss = loss + regularization_loss
                 # L2 regulalrization on base classes
-                if False:
+                # TODO: to be removed
+                if True:
                     with torch.no_grad():
                         distill_output = post_processor_distillation_ref(ori_feature, ori_spatial_res, scale_factor=10)
                     clf_loss = my_kd_criterion(output, distill_output) * self.cfg.TASK_SPECIFIC.GIFS.classifier_reg_lambda

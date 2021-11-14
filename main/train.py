@@ -137,13 +137,13 @@ def main():
         val_metric = my_trainer.val_one(device)
         print("Eval took {:.4f} seconds.".format(time.time() - start_cp))
         best_val_metric = val_metric
-        # if val_metric > best_val_metric:
-        print("Epoch {} New Best Model w/ metric: {:.4f}".format(epoch, val_metric))
-        best_val_metric = val_metric
-        if cfg.save_model:
-            best_model_path = "{0}_epoch{1}_{2:.4f}.pt".format(cfg.name, epoch, best_val_metric)
-            print("Saving model to {}".format(best_model_path))
-            my_trainer.save_model(best_model_path)
+        if True:
+            print("Epoch {} New Best Model w/ metric: {:.4f}".format(epoch, val_metric))
+            best_val_metric = val_metric
+            if cfg.save_model:
+                best_model_path = "{0}_epoch{1}_{2:.4f}.pt".format(cfg.name, epoch, best_val_metric)
+                print("Saving model to {}".format(best_model_path))
+                my_trainer.save_model(best_model_path)
                 
         print("===================================\n")
 

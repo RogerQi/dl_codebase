@@ -171,6 +171,7 @@ _C.TASK_SPECIFIC.GIFS.context_aware_sampling = False
 _C.TASK_SPECIFIC.GIFS.sequential_dataset_num_classes = 1
 _C.TASK_SPECIFIC.GIFS.baseset_type = 'random' # ('random', 'far', 'close', 'far_close')
 _C.TASK_SPECIFIC.GIFS.load_baseset = False
+_C.TASK_SPECIFIC.GIFS.num_runs = -1
 
 
 # ---------------------------
