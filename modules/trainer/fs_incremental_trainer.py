@@ -23,32 +23,6 @@ import utils
 from .sequential_GIFS_seg_trainer import sequential_GIFS_seg_trainer
 from IPython import embed
 
-class scene_clf_head(nn.Module):
-    def __init__(self, indim, outdim):
-        super(scene_clf_head, self).__init__()
-        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.intermediate = nn.Linear(indim, 512, bias=False)
-        self.L = nn.Linear( 512, outdim, bias = False)  
-
-        self.scale_factor = 30
-
-    def forward(self, x):
-        x_normalized = self.get_cos_embedding(x)
-        L_norm = torch.norm(self.L.weight.data, p=2, dim =1).unsqueeze(1).expand_as(self.L.weight.data)
-        self.L.weight.data = self.L.weight.data.div(L_norm + 1e-5)
-        cos_dist = self.L(x_normalized)
-
-        return self.scale_factor * cos_dist
-    
-    def get_cos_embedding(self, x):
-        x = self.avgpool(x)
-        assert len(x.shape) == 4 # BCHW
-        x = torch.flatten(x, start_dim = 1)
-        x = self.intermediate(x)
-        x_norm = torch.norm(x, p=2, dim =1).unsqueeze(1).expand_as(x)
-        x = x.div(x_norm+ 1e-5)
-        return x
-
 def harmonic_mean(base_iou, novel_iou):
     return 2 / (1. / base_iou + 1. / novel_iou)
 
@@ -74,17 +48,11 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         self.demo_pool = {}
 
         self.train_set_vanilla_label = dataset_module.get_train_set_vanilla_label(cfg)
-
-        # init a scene classification head
-        self.scene_classifier = scene_clf_head(2048, 365).to(self.device) # 365 classes
-
-        self.scene_classifier_trained = False
-        self.loaded_weight_path = None
     
     def construct_baseset(self):
         baseset_type = self.cfg.TASK_SPECIFIC.GIFS.baseset_type
         baseset_folder = f"save_{self.cfg.name}"
-        if self.cfg.TASK_SPECIFIC.GIFS.load_baseset:
+        if self.cfg.TASK_SPECIFIC.GIFS.load_baseset and baseset_type != 'random':
             print(f"load baseset from {baseset_folder}/examplar_list_{baseset_type}")
             examplar_list = torch.load(f"{baseset_folder}/examplar_list_{baseset_type}")
         elif baseset_type == 'random':
@@ -199,12 +167,18 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         # Sample an image from base memory bank
         if self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling:
             if torch.rand(1) < 0.5:
-                base_img_idx = np.random.choice(self.base_data_w_context)
+                memory_buffer_idx = np.random.choice(self.context_similar_map[novel_obj_id])
+                base_img_idx = self.base_img_candidates[memory_buffer_idx]
             else:
-                base_img_idx = np.random.choice(self.base_data_no_context)
+                # Complement of self.context_similar_map[novel_obj_id]
+                unrelated_idx_list = [i for i in range(memory_bank_size) if i not in self.context_similar_map[novel_obj_id]]
+                memory_buffer_idx = np.random.choice(unrelated_idx_list)
+                base_img_idx = self.base_img_candidates[memory_buffer_idx]
         else:
             # Sample from complete data pool (base dataset)
             base_img_idx = np.random.choice(self.base_img_candidates)
+        assert base_img_idx in self.base_img_candidates
+        assert len(self.base_img_candidates) == memory_bank_size
         syn_img_chw, syn_mask_hw = self.train_set_vanilla_label[base_img_idx]
         # Sample from partial data pool
         # Synthesis probabilities are computed using virtual RFS
@@ -226,75 +200,6 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
 
         return (syn_img_chw, syn_mask_hw)
     
-    def init_scene_training(self):
-        # init scene dataset and loader. The default loader is segmentation dataset
-        import dataset.places365_stanford as places365
-        self.scene_train_set = places365.Places365StanfordReader(utils.get_dataset_root(), True)
-        self.scene_train_set = utils.dataset_normalization_wrapper(self.cfg, self.scene_train_set)
-        self.scene_train_loader = torch.utils.data.DataLoader(self.scene_train_set, batch_size=16, shuffle=True, **self.loader_kwargs)
-        # define my own optimizer
-        self.scene_optimizer = optim.SGD(self.scene_classifier.parameters(), lr=1e-2)
-        # define my own loss
-        self.scene_criterion = nn.CrossEntropyLoss(ignore_index=-1).to(self.device)
-    
-    def scene_train_one(self, epoch):
-        self.backbone_net.eval()
-        self.post_processor.eval()
-        self.scene_classifier.train()
-        start_cp = time.time()
-        train_total_loss = 0
-        total_correct = 0
-        total_size = 0
-        for batch_idx, (data, target) in enumerate(self.scene_train_loader):
-            self.scene_optimizer.zero_grad() # reset gradient
-            data, target = data.to(self.device), target.to(self.device)
-            with torch.no_grad():
-                feature_map = self.backbone_net.feature_forward(data)
-            output = self.scene_classifier(feature_map)
-            loss = self.scene_criterion(output, target)
-            loss.backward()
-            train_total_loss += loss.item()
-            self.scene_optimizer.step()
-            if batch_idx % 5000 == 0:
-                pred = output.argmax(dim = 1, keepdim = True)
-                correct_prediction = pred.eq(target.view_as(pred)).sum().item()
-                batch_acc = correct_prediction / data.shape[0]
-                total_correct += correct_prediction
-                total_size += data.shape[0]
-                print('Train Epoch: {0} [{1}/{2} ({3:.0f}%)]\tLoss: {4:.6f}\tBatch Acc: {5:.6f} Epoch Elapsed Time: {6:.1f}'.format(
-                    epoch, batch_idx * len(data), len(self.scene_train_set),
-                    100. * batch_idx / len(self.scene_train_loader), loss.item(), batch_acc, time.time() - start_cp))
-        
-        return train_total_loss / len(self.train_loader), total_correct / total_size
-    
-    def train_scene_model(self, max_epoch=5):
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.scene_optimizer, max_epoch)
-        for epoch in range(1, max_epoch):
-            start_cp = time.time()
-            train_loss, train_acc = self.scene_train_one(epoch)
-            scheduler.step()
-            print("Training took {:.4f} seconds".format(time.time() - start_cp))
-            print("Training acc: {:.4f} Training loss: {:.4f}".format(train_acc, train_loss))
-            print("===================================\n")
-    
-    def save_model(self, file_path):
-        """Save default model (backbone_net, post_processor to a specified file path)
-
-        Args:
-            file_path (str): path to save the model
-        """
-        if self.scene_classifier_trained:
-            torch.save({
-                "backbone": self.backbone_net.state_dict(),
-                "head": self.post_processor.state_dict(),
-                "scene_clf_head": self.scene_classifier.state_dict(),
-            }, file_path)
-        else:
-            torch.save({
-                "backbone": self.backbone_net.state_dict(),
-                "head": self.post_processor.state_dict()
-            }, file_path)
-    
     def load_model(self, file_path):
         """Load weights for default model components (backbone_net, post_process) from a given file path
 
@@ -304,27 +209,37 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         trained_weight_dict = torch.load(file_path, map_location=self.device)
         self.backbone_net.load_state_dict(trained_weight_dict['backbone'], strict=True)
         self.post_processor.load_state_dict(trained_weight_dict['head'], strict=True)
-        self.loaded_weight_path = file_path
-        if 'scene_clf_head' in trained_weight_dict.keys():
-            self.scene_classifier.load_state_dict(trained_weight_dict['scene_clf_head'], strict=True)
-            self.scene_classifier_trained = True
+    
+    def get_scene_embedding(self, img):
+        '''
+        img: normalized image tensor of shape CHW
+        '''
+        assert len(img.shape) == 3 # CHW
+        assert img.shape[1] == img.shape[2]
+        img = img.view((1,) + img.shape)
+        if img.shape[2] != 224:
+            # Scene model is trained using 224 x 224 size
+            img = F.interpolate(img, size = (224, 224), mode = 'bilinear')
+        with torch.no_grad():
+            scene_embedding = self.scene_model(img)
+            scene_embedding = torch.flatten(scene_embedding, start_dim = 1)
+            # normalize to unit vector
+            norm = torch.norm(scene_embedding, p=2, dim =1).unsqueeze(1).expand_as(scene_embedding) # norm
+            scene_embedding = scene_embedding.div(norm+ 1e-5)
+        return scene_embedding.squeeze()
     
     def scene_model_setup(self):
-        # if option is selected and no existing model is available, train
-        if not self.scene_classifier_trained:
-            self.init_scene_training()
-            self.train_scene_model()
-            self.scene_classifier_trained = True
-            self.save_model(self.loaded_weight_path)
+        # Load torchscript
+        self.scene_model = torch.jit.load('/data/cvpr2022/vgg16_scene_net.pt')
+        self.scene_model = self.scene_model.cuda()
         # Compute feature vectors for data in the pool
         self.base_pool_cos_embeddings = []
         for base_data_idx in self.base_img_candidates:
             img_chw, _ = self.train_set_vanilla_label[base_data_idx]
-            img_bchw = img_chw.view((1,) + img_chw.shape).to(self.device)
-            with torch.no_grad():
-                feature_map = self.backbone_net.feature_forward(img_bchw)
-                cos_vec_bc = self.scene_classifier.get_cos_embedding(feature_map) # B x C (1 x 512)
-                self.base_pool_cos_embeddings.append(cos_vec_bc.squeeze()) # 512
+            img_chw = img_chw.to(self.device)
+            scene_embedding = self.get_scene_embedding(img_chw)
+            assert len(scene_embedding.shape) == 1
+            self.base_pool_cos_embeddings.append(scene_embedding)
         self.base_pool_cos_embeddings = torch.stack(self.base_pool_cos_embeddings)
     
     def copy_and_paste(self, novel_img_chw, novel_mask_hw, base_img_chw, base_mask_hw, mask_id):
@@ -355,62 +270,64 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         assert self.prv_post_processor is not None
 
         if self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling:
-            self.base_data_w_context = []
+            self.context_similar_map = {}
 
         for b in range(supp_img_bchw.shape[0]):
             novel_img_chw = supp_img_bchw[b]
-
+            mask_hw = supp_mask_bhw[b]
+            
+            # Each image contains only 1 novel class (to ensure only num_shots samples are presented)
+            for novel_obj_id in novel_class_idx:
+                if novel_obj_id in mask_hw:
+                    break
+            
+            # Sanity check to ensure above statement
+            for class_id in novel_class_idx:
+                if class_id == novel_obj_id: continue
+                assert class_id not in mask_hw
+            
             # Compute cosine embedding
             if self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling:
-                novel_img_bchw = novel_img_chw.view((1,) + novel_img_chw.shape).to(self.device)
-                with torch.no_grad():
-                    feature_map = self.vanilla_backbone_net.feature_forward(novel_img_bchw)
-                    cos_vec_bc = self.scene_classifier.get_cos_embedding(feature_map) # B x C (1 x 512)
-                    similarity_score = F.cosine_similarity(cos_vec_bc, self.base_pool_cos_embeddings)
-                    base_candidates = torch.argsort(similarity_score)[-int(0.1 * self.base_pool_cos_embeddings.shape[0]):] # B integer array
-                    self.base_data_w_context += list(base_candidates.cpu().numpy())
-
-            mask_hw = supp_mask_bhw[b]
-            for novel_obj_id in novel_class_idx:
-                novel_mask_hw = (mask_hw == novel_obj_id)
-
-                novel_mask_hw_np = novel_mask_hw.numpy().astype(np.uint8)
-
-                # RETR_EXTERNAL to keep online the outer contour
-                contours, _ = cv2.findContours(novel_mask_hw_np, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                if True:
-                    # whole image
-                    if len(contours) == 0: continue
-                    cnt = contours[0]
-                    x_min = tuple(cnt[cnt[:,:,0].argmin()][0])[0]
-                    x_max = tuple(cnt[cnt[:,:,0].argmax()][0])[0]
-                    y_min = tuple(cnt[cnt[:,:,1].argmin()][0])[1]
-                    y_max = tuple(cnt[cnt[:,:,1].argmax()][0])[1]
-                    for cnt in contours:
-                        x_min = min(x_min, tuple(cnt[cnt[:,:,0].argmin()][0])[0])
-                        x_max = max(x_max, tuple(cnt[cnt[:,:,0].argmax()][0])[0])
-                        y_min = min(y_min, tuple(cnt[cnt[:,:,1].argmin()][0])[1])
-                        y_max = max(y_max, tuple(cnt[cnt[:,:,1].argmax()][0])[1])
-                    if novel_obj_id not in self.partial_data_pool:
-                        self.partial_data_pool[novel_obj_id] = []
-                    mask_roi = novel_mask_hw[y_min:y_max,x_min:x_max]
-                    img_roi = novel_img_chw[:,y_min:y_max,x_min:x_max]
-                    self.partial_data_pool[novel_obj_id].append((img_roi, mask_roi))
+                scene_embedding = self.get_scene_embedding(novel_img_chw.cuda())
+                scene_embedding = scene_embedding.view((1,) + scene_embedding.shape)
+                similarity_score = F.cosine_similarity(scene_embedding, self.base_pool_cos_embeddings)
+                base_candidates = torch.argsort(similarity_score)[-int(0.1 * self.base_pool_cos_embeddings.shape[0]):] # Indices array
+                if novel_obj_id not in self.context_similar_map:
+                    self.context_similar_map[novel_obj_id] = list(base_candidates.cpu().numpy())
                 else:
-                    # Register new masks by parts
-                    for ctr in contours:
-                        x, y, w, h = cv2.boundingRect(ctr)
-                        if novel_obj_id not in self.partial_data_pool:
-                            self.partial_data_pool[novel_obj_id] = []
-                        mask_roi = novel_mask_hw[y:y+h,x:x+w]
-                        if torch.sum(mask_roi) < 100:
-                            continue
-                        img_roi = novel_img_chw[:,y:y+h,x:x+w]
-                        self.partial_data_pool[novel_obj_id].append((img_roi, mask_roi))
+                    self.context_similar_map[novel_obj_id] += list(base_candidates.cpu().numpy())
+
+            novel_mask_hw = (mask_hw == novel_obj_id)
+
+            novel_mask_hw_np = novel_mask_hw.numpy().astype(np.uint8)
+
+            # RETR_EXTERNAL to keep online the outer contour
+            contours, _ = cv2.findContours(novel_mask_hw_np, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            # Crop annotated objects off the image
+            # Compute a minimum rectangle containing the object
+            if len(contours) == 0: continue
+            cnt = contours[0]
+            x_min = tuple(cnt[cnt[:,:,0].argmin()][0])[0]
+            x_max = tuple(cnt[cnt[:,:,0].argmax()][0])[0]
+            y_min = tuple(cnt[cnt[:,:,1].argmin()][0])[1]
+            y_max = tuple(cnt[cnt[:,:,1].argmax()][0])[1]
+            for cnt in contours:
+                x_min = min(x_min, tuple(cnt[cnt[:,:,0].argmin()][0])[0])
+                x_max = max(x_max, tuple(cnt[cnt[:,:,0].argmax()][0])[0])
+                y_min = min(y_min, tuple(cnt[cnt[:,:,1].argmin()][0])[1])
+                y_max = max(y_max, tuple(cnt[cnt[:,:,1].argmax()][0])[1])
+            # Minimum bounding rectangle computed; now register it to the data pool
+            if novel_obj_id not in self.partial_data_pool:
+                self.partial_data_pool[novel_obj_id] = []
+            # mask_roi is a boolean array
+            mask_roi = novel_mask_hw[y_min:y_max,x_min:x_max]
+            img_roi = novel_img_chw[:,y_min:y_max,x_min:x_max]
+            self.partial_data_pool[novel_obj_id].append((img_roi, mask_roi))
 
         if self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling:
-            self.base_data_w_context = list(set(self.base_data_w_context))
-            self.base_data_no_context = [i for i in range(memory_bank_size) if i not in self.base_data_w_context]
+            for c in self.context_similar_map:
+                self.context_similar_map[c] = list(set(self.context_similar_map[c]))
 
         self.backbone_net.train()
         self.post_processor.train()
