@@ -11,7 +11,7 @@ SYSTEM:
   num_workers: 16
 
 BACKBONE:
-  network: 'deeplabv3_resnet101'
+  network: 'deeplabv3_resnet101_renorm'
   pooling: False
   use_pretrained: True
   pretrained_path: "/data/pretrained_model/resnet101-5d3b4d8f.pth"
@@ -69,7 +69,8 @@ TASK_SPECIFIC:
     classifier_lr: 1e-2
     feature_reg_lambda: 0.1
     classifier_reg_lambda: 0.0
-    context_aware_sampling: True
+    context_aware_sampling: False
+    num_runs: 10
 
 TEST:
   batch_size: 1

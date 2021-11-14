@@ -70,6 +70,7 @@ TASK_SPECIFIC:
     sequential_dataset_num_classes: 5
     baseset_type: 'far_close'
     load_baseset: False
+    num_runs: 5
 
 TEST:
   batch_size: 1

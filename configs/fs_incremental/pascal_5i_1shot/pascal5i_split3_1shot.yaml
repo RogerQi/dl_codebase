@@ -1,4 +1,4 @@
-name: 'GIFS_pascal_voc_split0'
+name: 'GIFS_pascal_voc_split3'
 task: 'few_shot_incremental'
 input_dim: (3, 512, 512)
 num_classes: 16
@@ -25,7 +25,7 @@ LOSS:
 DATASET:
   dataset: 'pascal_5i'
   PASCAL5i:
-    folding: 0
+    folding: 3
   TRANSFORM:
     TRAIN:
       transforms: ('normalize', )
@@ -47,7 +47,7 @@ DATASET:
 TRAIN:
   max_epochs: 5
   lr_max_epoch: 10
-  batch_size: 24
+  batch_size: 32
   initial_lr: 0.007
   lr_scheduler: "polynomial"
   step_down_gamma: 0.1
@@ -63,7 +63,7 @@ TASK_SPECIFIC:
     fine_tuning: True
     pseudo_base_label: False
     max_iter: 200
-    num_shots: 5
+    num_shots: 1
     ft_batch_size: 5
     backbone_lr: 1e-3
     classifier_lr: 1e-2
