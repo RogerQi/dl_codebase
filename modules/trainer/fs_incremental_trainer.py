@@ -181,18 +181,47 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         assert len(self.base_img_candidates) == memory_bank_size
         syn_img_chw, syn_mask_hw = self.train_set_vanilla_label[base_img_idx]
         # Sample from partial data pool
-        # Synthesis probabilities are computed using virtual RFS
-        # TODO(roger): automate this probability computation
-        if len(self.partial_data_pool) > 1 and torch.rand(1) < 0.5568: # VOC: 0.5568 COCO: 0.5124
+        # Compute probability for synthesis
+        candidate_classes = [c for c in self.partial_data_pool.keys() if c != novel_obj_id]
+        # Gather some useful numbers
+        num_base_classes = len(self.train_set_vanilla_label.dataset.get_label_range())
+        num_novel_classes = len(self.partial_data_pool)
+        total_classes = num_base_classes + num_novel_classes
+        num_novel_instances = len(self.partial_data_pool[novel_obj_id])
+        for k in candidate_classes:
+            assert len(self.partial_data_pool[k]) == num_novel_instances, "every class is expected to have $numShot$ samples"
+        if self.cfg.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat == 'vRFS':
+            t = 1. / total_classes
+            f_n = num_novel_instances / memory_bank_size
+            r_e = max(1, np.sqrt(t / f_n))
+            r_n = r_e * 2
+            other_prob = (r_e + r_n) / (r_e + r_n + 1 + r_n)
+            selected_novel_prob = (r_n + r_n) / (r_e + r_n + 1 + r_n)
+        elif self.cfg.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat == 'always':
+            other_prob = 0
+            selected_novel_prob = 1
+        elif self.cfg.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat == 'always_no':
+            other_prob = 0
+            selected_novel_prob = 0
+        elif self.cfg.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat == 'CAS':
+            other_prob = 1. / total_classes
+            selected_novel_prob = 1. / total_classes
+        else:
+            raise NotImplementedError("Unknown probabilistic synthesis strategy: {}".format(self.cfg.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat))
+        assert other_prob >= 0 and other_prob <= 1
+        assert selected_novel_prob >= 0 and selected_novel_prob <= 1
+
+        # Synthesize some other objects other than the selected novel object
+        if len(self.partial_data_pool) > 1 and torch.rand(1) < other_prob:
             # select an old class
-            candidate_classes = [c for c in self.partial_data_pool.keys() if c != novel_obj_id]
             for i in range(num_existing_objects):
                 selected_class = np.random.choice(candidate_classes)
                 selected_sample = random.choice(self.partial_data_pool[selected_class])
                 img_chw, mask_hw = selected_sample
                 syn_img_chw, syn_mask_hw = self.copy_and_paste(img_chw, mask_hw, syn_img_chw, syn_mask_hw, selected_class)
 
-        if torch.rand(1) < 0.7424: # VOC: 0.7424 COCO: 0.6832
+        # Synthesize selected novel class
+        if torch.rand(1) < selected_novel_prob:
             for i in range(num_novel_objects):
                 selected_sample = random.choice(self.partial_data_pool[novel_obj_id])
                 img_chw, mask_hw = selected_sample
