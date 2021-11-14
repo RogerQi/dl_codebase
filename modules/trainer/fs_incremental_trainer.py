@@ -48,6 +48,9 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         self.demo_pool = {}
 
         self.train_set_vanilla_label = dataset_module.get_train_set_vanilla_label(cfg)
+
+        assert self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling_prob >= 0
+        assert self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling_prob <= 1
     
     def construct_baseset(self):
         baseset_type = self.cfg.TASK_SPECIFIC.GIFS.baseset_type
@@ -157,7 +160,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         if self.cfg.TASK_SPECIFIC.GIFS.num_runs != -1:
             num_runs = self.cfg.TASK_SPECIFIC.GIFS.num_runs
         self.base_img_candidates = self.construct_baseset()
-        if self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling:
+        if self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling_prob > 0:
             self.scene_model_setup()
         sequential_GIFS_seg_trainer.test_one(self, device, num_runs)
     
@@ -165,17 +168,12 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         num_existing_objects = 2
         num_novel_objects = 2
         # Sample an image from base memory bank
-        if self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling:
-            if torch.rand(1) < 0.5:
-                memory_buffer_idx = np.random.choice(self.context_similar_map[novel_obj_id])
-                base_img_idx = self.base_img_candidates[memory_buffer_idx]
-            else:
-                # Complement of self.context_similar_map[novel_obj_id]
-                unrelated_idx_list = [i for i in range(memory_bank_size) if i not in self.context_similar_map[novel_obj_id]]
-                memory_buffer_idx = np.random.choice(unrelated_idx_list)
-                base_img_idx = self.base_img_candidates[memory_buffer_idx]
+        if torch.rand(1) < self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling_prob:
+            # Context-aware sampling from a contextually-similar subset of the memory replay buffer
+            memory_buffer_idx = np.random.choice(self.context_similar_map[novel_obj_id])
+            base_img_idx = self.base_img_candidates[memory_buffer_idx]
         else:
-            # Sample from complete data pool (base dataset)
+            # Uniformly sample from the memory buffer
             base_img_idx = np.random.choice(self.base_img_candidates)
         assert base_img_idx in self.base_img_candidates
         assert len(self.base_img_candidates) == memory_bank_size
@@ -298,7 +296,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         assert self.prv_backbone_net is not None
         assert self.prv_post_processor is not None
 
-        if self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling:
+        if self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling_prob > 0:
             self.context_similar_map = {}
 
         for b in range(supp_img_bchw.shape[0]):
@@ -316,7 +314,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                 assert class_id not in mask_hw
             
             # Compute cosine embedding
-            if self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling:
+            if self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling_prob > 0:
                 scene_embedding = self.get_scene_embedding(novel_img_chw.cuda())
                 scene_embedding = scene_embedding.view((1,) + scene_embedding.shape)
                 similarity_score = F.cosine_similarity(scene_embedding, self.base_pool_cos_embeddings)
@@ -354,7 +352,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
             img_roi = novel_img_chw[:,y_min:y_max,x_min:x_max]
             self.partial_data_pool[novel_obj_id].append((img_roi, mask_roi))
 
-        if self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling:
+        if self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling_prob > 0:
             for c in self.context_similar_map:
                 self.context_similar_map[c] = list(set(self.context_similar_map[c]))
 
