@@ -69,7 +69,7 @@ TASK_SPECIFIC:
     classifier_lr: 1e-2
     feature_reg_lambda: 0.1
     classifier_reg_lambda: 0.0
-    context_aware_sampling_prob: 0.0
+    context_aware_sampling_prob: 0.6
     num_runs: 10
 
 TEST:
