@@ -170,7 +170,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         sequential_GIFS_seg_trainer.test_one(self, device, num_runs)
     
     def synthesizer_sample(self, novel_obj_id):
-        num_existing_objects = 3
+        num_existing_objects = 2
         num_novel_objects = 2
         # Sample an image from base memory bank
         if torch.rand(1) < self.context_aware_prob:
