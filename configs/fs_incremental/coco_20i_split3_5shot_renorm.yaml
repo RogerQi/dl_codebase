@@ -65,7 +65,7 @@ TASK_SPECIFIC:
     backbone_lr: 1e-3
     classifier_lr: 1e-2
     feature_reg_lambda: 0.5
-    classifier_reg_lambda: 0.1
+    classifier_reg_lambda: 0.0
     context_aware_sampling_prob: 0.0
     sequential_dataset_num_classes: 5
     baseset_type: 'far_close'
