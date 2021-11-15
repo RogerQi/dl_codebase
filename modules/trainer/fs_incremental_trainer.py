@@ -63,7 +63,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         if os.path.exists(saved_path) and baseset_type != 'random':
             print(f"load baseset from {baseset_folder}/examplar_list_{baseset_type}")
             examplar_list = torch.load(saved_path)
-        if baseset_type == 'random':
+        elif baseset_type == 'random':
             print(f"construct {baseset_type} baseset for {self.cfg.name}")
             examplar_list = np.arange(0, len(self.train_set_vanilla_label))
         elif baseset_type in ['far', 'close', 'far_close']:
