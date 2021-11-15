@@ -194,7 +194,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         for k in candidate_classes:
             assert len(self.partial_data_pool[k]) == num_novel_instances, "every class is expected to have $numShot$ samples"
         if self.cfg.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat == 'vRFS':
-            t = 1. / 100
+            t = 1. / total_classes
             f_n = num_novel_instances / memory_bank_size
             r_e = max(1, np.sqrt(t / f_n))
             r_n = r_e
