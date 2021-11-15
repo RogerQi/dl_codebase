@@ -69,7 +69,6 @@ TASK_SPECIFIC:
     context_aware_sampling_prob: 0.0
     sequential_dataset_num_classes: 5
     baseset_type: 'far_close'
-    load_baseset: False
     num_runs: 5
 
 TEST:

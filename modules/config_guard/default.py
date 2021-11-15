@@ -170,7 +170,6 @@ _C.TASK_SPECIFIC.GIFS.classifier_reg_lambda = 0.1
 _C.TASK_SPECIFIC.GIFS.context_aware_sampling_prob = 0.0
 _C.TASK_SPECIFIC.GIFS.sequential_dataset_num_classes = 1
 _C.TASK_SPECIFIC.GIFS.baseset_type = 'random' # ('random', 'far', 'close', 'far_close')
-_C.TASK_SPECIFIC.GIFS.load_baseset = False
 _C.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat = 'vRFS' # ('vRFS', 'always', 'always_no', 'CAS', 'half')
 _C.TASK_SPECIFIC.GIFS.num_runs = -1
 

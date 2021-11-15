@@ -1,4 +1,4 @@
-name: 'GIFS_coco20i_split3_renorm'
+name: 'GIFS_coco20i_split1_renorm'
 task: 'few_shot_incremental'
 input_dim: (3, 512, 512)
 num_classes: 61
@@ -25,7 +25,7 @@ LOSS:
 DATASET:
   dataset: 'coco_20i'
   COCO20i:
-    folding: 3
+    folding: 1
   TRANSFORM:
     TRAIN:
       transforms: ('normalize', )
@@ -70,6 +70,7 @@ TASK_SPECIFIC:
     sequential_dataset_num_classes: 5
     baseset_type: 'far_close'
     num_runs: 5
+    probabilistic_synthesis_strat: 'always'
 
 TEST:
   batch_size: 1

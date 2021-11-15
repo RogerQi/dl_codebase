@@ -49,16 +49,21 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
 
         self.train_set_vanilla_label = dataset_module.get_train_set_vanilla_label(cfg)
 
-        assert self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling_prob >= 0
-        assert self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling_prob <= 1
+        self.context_aware_prob = self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling_prob
+
+        print("Context aware probability: {}".format(self.context_aware_prob))
+
+        assert self.context_aware_prob >= 0
+        assert self.context_aware_prob <= 1
     
     def construct_baseset(self):
         baseset_type = self.cfg.TASK_SPECIFIC.GIFS.baseset_type
         baseset_folder = f"save_{self.cfg.name}"
-        if self.cfg.TASK_SPECIFIC.GIFS.load_baseset and baseset_type != 'random':
+        saved_path = f"{baseset_folder}/examplar_list_{baseset_type}"
+        if os.path.exists(saved_path) and baseset_type != 'random':
             print(f"load baseset from {baseset_folder}/examplar_list_{baseset_type}")
-            examplar_list = torch.load(f"{baseset_folder}/examplar_list_{baseset_type}")
-        elif baseset_type == 'random':
+            examplar_list = torch.load(saved_path)
+        if baseset_type == 'random':
             print(f"construct {baseset_type} baseset for {self.cfg.name}")
             examplar_list = np.arange(0, len(self.train_set_vanilla_label))
         elif baseset_type in ['far', 'close', 'far_close']:
@@ -160,7 +165,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         if self.cfg.TASK_SPECIFIC.GIFS.num_runs != -1:
             num_runs = self.cfg.TASK_SPECIFIC.GIFS.num_runs
         self.base_img_candidates = self.construct_baseset()
-        if self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling_prob > 0:
+        if self.context_aware_prob > 0:
             self.scene_model_setup()
         sequential_GIFS_seg_trainer.test_one(self, device, num_runs)
     
@@ -168,7 +173,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         num_existing_objects = 2
         num_novel_objects = 2
         # Sample an image from base memory bank
-        if torch.rand(1) < self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling_prob:
+        if torch.rand(1) < self.context_aware_prob:
             # Context-aware sampling from a contextually-similar subset of the memory replay buffer
             memory_buffer_idx = np.random.choice(self.context_similar_map[novel_obj_id])
             base_img_idx = self.base_img_candidates[memory_buffer_idx]
@@ -274,6 +279,22 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         if torch.rand(1) < 0.5:
             novel_img_chw = tr_F.hflip(novel_img_chw)
             novel_mask_hw = tr_F.hflip(novel_mask_hw)
+        
+        # Random resizing
+        if False:
+            scale = np.random.uniform(0.8, 1.2)
+            src_h, src_w = novel_mask_hw.shape
+            if src_h * scale > base_mask_hw.shape[0]:
+                scale = base_mask_hw.shape[0] / src_h
+            if src_w * scale > base_mask_hw.shape[1]:
+                scale = base_mask_hw.shape[1] / src_w
+            target_H = int(src_h * scale)
+            target_W = int(src_w * scale)
+            # apply
+            novel_img_chw = tr_F.resize(novel_img_chw, (target_H, target_W))
+            novel_mask_hw = novel_mask_hw.view((1,) + novel_mask_hw.shape)
+            novel_mask_hw = tr_F.resize(novel_mask_hw, (target_H, target_W), interpolation=torchvision.transforms.InterpolationMode.NEAREST)
+            novel_mask_hw = novel_mask_hw.view(novel_mask_hw.shape[1:])
 
         # Random Translation
         h, w = novel_mask_hw.shape
@@ -296,7 +317,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         assert self.prv_backbone_net is not None
         assert self.prv_post_processor is not None
 
-        if self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling_prob > 0:
+        if self.context_aware_prob > 0:
             self.context_similar_map = {}
 
         for b in range(supp_img_bchw.shape[0]):
@@ -314,7 +335,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                 assert class_id not in mask_hw
             
             # Compute cosine embedding
-            if self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling_prob > 0:
+            if self.context_aware_prob > 0:
                 scene_embedding = self.get_scene_embedding(novel_img_chw.cuda())
                 scene_embedding = scene_embedding.view((1,) + scene_embedding.shape)
                 similarity_score = F.cosine_similarity(scene_embedding, self.base_pool_cos_embeddings)
@@ -352,7 +373,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
             img_roi = novel_img_chw[:,y_min:y_max,x_min:x_max]
             self.partial_data_pool[novel_obj_id].append((img_roi, mask_roi))
 
-        if self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling_prob > 0:
+        if self.context_aware_prob > 0:
             for c in self.context_similar_map:
                 self.context_similar_map[c] = list(set(self.context_similar_map[c]))
 
