@@ -21,7 +21,7 @@ COCO_PATH = os.path.join(utils.get_dataset_root(), "COCO2017")
 class COCOSeg(datasets.vision.VisionDataset):
     def __init__(self, root, train=True):
         super(COCOSeg, self).__init__(root, None, None, None)
-        self.min_area = 0 # 200
+        self.min_area = 200 # small areas are marked as crowded
         split_name = "train" if train else "val"
         self.annotation_path = os.path.join(root, 'annotations', 'instances_{}2017.json'.format(split_name))
         self.img_dir = os.path.join(root, '{}2017'.format(split_name))
@@ -41,24 +41,21 @@ class COCOSeg(datasets.vision.VisionDataset):
         # Given a class idx (1-80), self.instance_class_map gives the list of images that contain
         # this class idx
         class_map_dir = os.path.join(root, 'instance_seg_class_map', split_name)
-        self.mask_dir = os.path.join(root, 'annotations', 'instance_semantic_mask_{}'.format(split_name))
         if not os.path.exists(class_map_dir):
             # Merge VOC and SBD datasets and create auxiliary files
             try:
-                assert not os.path.exists(self.mask_dir)
-                self.create_coco_class_map(class_map_dir, self.mask_dir)
+                self.create_coco_class_map(class_map_dir)
             except (Exception, KeyboardInterrupt) as e:
                 # Dataset creation fail for some reason...
                 shutil.rmtree(class_map_dir)
-                shutil.rmtree(self.mask_dir)
                 raise e
         
         self.instance_class_map = {}
         for c in range(1, 81):
             class_map_path = os.path.join(class_map_dir, str(c) + ".txt")
-            class_idx_list = list(np.loadtxt(class_map_path, dtype='str'))
-            # Map name to indices
-            class_idx_list = [int(i) for i in class_idx_list]
+            with open(class_map_path, 'r') as f:
+                class_idx_list = f.readlines()
+            class_idx_list = [int(i.strip()) for i in class_idx_list if i]
             self.instance_class_map[c] = class_idx_list
 
         self.CLASS_NAMES_LIST = ['background']
@@ -66,11 +63,9 @@ class COCOSeg(datasets.vision.VisionDataset):
             cls_name = self.coco.cats[class_list[i]]['name']
             self.CLASS_NAMES_LIST.append(cls_name)
     
-    def create_coco_class_map(self, class_map_dir, mask_dir):
+    def create_coco_class_map(self, class_map_dir):
         assert not os.path.exists(class_map_dir)
-        assert not os.path.exists(mask_dir)
         os.makedirs(class_map_dir)
-        os.makedirs(mask_dir)
 
         instance_class_map = {}
         for c in range(1, 81):
@@ -118,7 +113,7 @@ class COCOSeg(datasets.vision.VisionDataset):
             if ann['iscrowd'] or ann['area'] < self.min_area:
                 seg_mask[ann_mask > 0] = -1
             else:
-                assert real_class_id >= 0 and real_class_id <= 80
+                assert real_class_id > 0 and real_class_id <= 80
                 seg_mask = torch.max(seg_mask, ann_mask * real_class_id)
         return seg_mask.long()
     

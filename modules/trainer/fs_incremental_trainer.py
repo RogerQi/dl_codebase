@@ -201,7 +201,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
             other_prob = (r_e + r_n) / (r_e + r_n + 1 + r_n)
             selected_novel_prob = (r_n + r_n) / (r_e + r_n + 1 + r_n)
         elif self.cfg.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat == 'always':
-            other_prob = 0
+            other_prob = 1
             selected_novel_prob = 1
         elif self.cfg.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat == 'always_no':
             other_prob = 0
@@ -334,6 +334,15 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                 if class_id == novel_obj_id: continue
                 assert class_id not in mask_hw
             
+            if self.cfg.TASK_SPECIFIC.GIFS.pseudo_base_label:
+                # Mask non-novel portion using pseudo labels
+                novel_mask = torch.zeros_like(target_bhw)
+                for novel_idx in novel_class_idx:
+                    novel_mask = torch.logical_or(novel_mask, target_bhw == novel_idx)
+                tmp_target_bhw = output.max(dim = 1)[1]
+                tmp_target_bhw[novel_mask] = target_bhw[novel_mask]
+                target_bhw = tmp_target_bhw
+            
             # Compute cosine embedding
             if self.context_aware_prob > 0:
                 scene_embedding = self.get_scene_embedding(novel_img_chw.cuda())
@@ -443,14 +452,6 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                     # self.vanilla_backbone_net for the base version
                     ori_feature = self.prv_backbone_net(data_bchw)
                     ori_logit = self.prv_post_processor(ori_feature, ori_spatial_res, scale_factor=10)
-
-                # if self.cfg.TASK_SPECIFIC.GIFS.pseudo_base_label:
-                #     novel_mask = torch.zeros_like(target_bhw)
-                #     for novel_idx in novel_class_idx:
-                #         novel_mask = torch.logical_or(novel_mask, target_bhw == novel_idx)
-                #     tmp_target_bhw = output.max(dim = 1)[1]
-                #     tmp_target_bhw[novel_mask] = target_bhw[novel_mask]
-                #     target_bhw = tmp_target_bhw
 
                 loss = self.criterion(output, target_bhw)
 
