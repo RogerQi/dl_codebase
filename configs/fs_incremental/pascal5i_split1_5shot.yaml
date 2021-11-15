@@ -71,6 +71,7 @@ TASK_SPECIFIC:
     classifier_reg_lambda: 0.0
     context_aware_sampling_prob: 0.6
     num_runs: 10
+    baseset_type: 'far_close'
 
 TEST:
   batch_size: 1

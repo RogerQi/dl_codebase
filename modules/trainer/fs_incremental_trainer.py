@@ -170,7 +170,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         sequential_GIFS_seg_trainer.test_one(self, device, num_runs)
     
     def synthesizer_sample(self, novel_obj_id):
-        num_existing_objects = 2
+        num_existing_objects = 3
         num_novel_objects = 2
         # Sample an image from base memory bank
         if torch.rand(1) < self.context_aware_prob:
@@ -194,10 +194,10 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         for k in candidate_classes:
             assert len(self.partial_data_pool[k]) == num_novel_instances, "every class is expected to have $numShot$ samples"
         if self.cfg.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat == 'vRFS':
-            t = 1. / total_classes
+            t = 1. / 100
             f_n = num_novel_instances / memory_bank_size
             r_e = max(1, np.sqrt(t / f_n))
-            r_n = r_e * 2
+            r_n = r_e
             other_prob = (r_e + r_n) / (r_e + r_n + 1 + r_n)
             selected_novel_prob = (r_n + r_n) / (r_e + r_n + 1 + r_n)
         elif self.cfg.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat == 'always':
