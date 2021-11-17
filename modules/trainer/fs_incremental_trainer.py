@@ -170,8 +170,6 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         sequential_GIFS_seg_trainer.test_one(self, device, num_runs)
     
     def synthesizer_sample(self, novel_obj_id):
-        num_existing_objects = 2
-        num_novel_objects = 2
         # Sample an image from base memory bank
         if torch.rand(1) < self.context_aware_prob:
             # Context-aware sampling from a contextually-similar subset of the memory replay buffer
@@ -200,15 +198,23 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
             r_n = r_e
             other_prob = (r_e + r_n) / (r_e + r_n + 1 + r_n)
             selected_novel_prob = (r_n + r_n) / (r_e + r_n + 1 + r_n)
+            num_existing_objects = 2
+            num_novel_objects = 2
         elif self.cfg.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat == 'always':
             other_prob = 1
             selected_novel_prob = 1
+            num_existing_objects = 0
+            num_novel_objects = 1
         elif self.cfg.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat == 'always_no':
             other_prob = 0
             selected_novel_prob = 0
+            num_existing_objects = 0
+            num_novel_objects = 0
         elif self.cfg.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat == 'CAS':
             other_prob = 1. / total_classes
             selected_novel_prob = 1. / total_classes
+            num_existing_objects = 2
+            num_novel_objects = 2
         else:
             raise NotImplementedError("Unknown probabilistic synthesis strategy: {}".format(self.cfg.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat))
         assert other_prob >= 0 and other_prob <= 1
@@ -336,12 +342,17 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
             
             if self.cfg.TASK_SPECIFIC.GIFS.pseudo_base_label:
                 # Mask non-novel portion using pseudo labels
-                novel_mask = torch.zeros_like(target_bhw)
-                for novel_idx in novel_class_idx:
-                    novel_mask = torch.logical_or(novel_mask, target_bhw == novel_idx)
-                tmp_target_bhw = output.max(dim = 1)[1]
-                tmp_target_bhw[novel_mask] = target_bhw[novel_mask]
-                target_bhw = tmp_target_bhw
+                novel_mask = torch.zeros_like(supp_mask_bhw[b])
+                novel_mask = torch.logical_or(novel_mask, supp_mask_bhw[b] == novel_obj_id)
+                with torch.no_grad():
+                    data_bchw = supp_img_bchw[b]
+                    data_bchw = data_bchw.view((1,) + data_bchw.shape)
+                    feature = self.prv_backbone_net(data_bchw)
+                    ori_spatial_res = data_bchw.shape[-2:]
+                    output = self.prv_post_processor(feature, ori_spatial_res, scale_factor=10)
+                tmp_target_hw = output.max(dim = 1)[1].cpu()[0]
+                tmp_target_hw[novel_mask] = supp_mask_bhw[b][novel_mask]
+                supp_mask_bhw[b] = tmp_target_hw
             
             # Compute cosine embedding
             if self.context_aware_prob > 0:

@@ -23,6 +23,13 @@ def norm_tensor_to_np(cfg, arr):
     arr = (ori_rgb_np * 255).astype(np.uint8)
     return arr
 
+def save_to_disk(cfg, arr, path):
+    if isinstance(arr, torch.Tensor) and arr.shape[0] == 3:
+        # TODO: check tensor type (float) to denormalize.
+        arr = norm_tensor_to_np(cfg, arr)
+    im = Image.fromarray(arr)
+    im.save(path)
+
 # A generalized imshow helper function which supports displaying (CxHxW) tensor
 def generalized_imshow(cfg, arr):
     '''
@@ -43,7 +50,8 @@ def visualize_segmentation(cfg, img, label_np, class_names_list):
     img: 3 x H x W. range 0-1
     label: H x W. range 0-num_classes
     """
-    assert label_np.max() < len(class_names_list)
+    if class_names_list is not None:
+        assert label_np.max() < len(class_names_list)
     ori_img = norm_tensor_to_np(cfg, img)
     rgb_img_w_lbl = imgviz.label2rgb(
         label=label_np, img=imgviz.asgray(ori_img), label_names=class_names_list, loc="rb"

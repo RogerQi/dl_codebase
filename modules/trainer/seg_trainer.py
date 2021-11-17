@@ -87,8 +87,8 @@ class seg_trainer(trainer_base):
                         class_intersection += intersection
                         class_union += union
                     if (idx + 1) % visfreq == 0:
-                        gt_label = utils.visualize_segmentation(self.cfg, data[i], target_np, class_names_list)
-                        predicted_label = utils.visualize_segmentation(self.cfg, data[i], pred_np, class_names_list)
+                        gt_label = utils.visualize_segmentation(self.cfg, data[i], target_np, None)
+                        predicted_label = utils.visualize_segmentation(self.cfg, data[i], pred_np, None)
                         cv2.imwrite("{}_{}_pred.png".format(idx, i), predicted_label)
                         cv2.imwrite("{}_{}_label.png".format(idx, i), gt_label)
                         # Visualize RGB image as well
