@@ -44,7 +44,10 @@ def joint_random_crop(transforms_cfg):
             return (img[:, i:i + output_H, j:j + output_W], target[:, i:i + output_H, j:j + output_W])
     return crop
 
-@joint_transforms_registry.register
+# @joint_transforms_registry.register
+# Though this is helpful in classification, empirically it seems to hurt segmentation performance.
+# (possibly due to loss of context)
+# Hence, it is excluded from the registry for now to prevent misuse.
 def joint_random_resized_crop(transforms_cfg):
     output_H, output_W = transforms_cfg.TRANSFORMS_DETAILS.crop_size
     cropper = torchvision.transforms.RandomResizedCrop((output_H, output_W))
@@ -79,35 +82,33 @@ def joint_naive_resize(transforms_cfg):
     return crop
 
 @joint_transforms_registry.register
-def joint_random_keep_ratio_resize(transforms_cfg):
+def joint_random_scale_crop(transforms_cfg):
     output_H, output_W = transforms_cfg.TRANSFORMS_DETAILS.crop_size
     assert output_H == output_W
-    short_edge_list = transforms_cfg.TRANSFORMS_DETAILS.RANDOM_RESIZE.short_edge_list
     size = (output_H, output_W)
     def crop(img, target):
-        assert img.shape[-2:] == target.shape[-2:]
+        assert img.shape[-2:] == target.shape[-2:], "image and label map size mismatched"
         img_H = img.shape[-2]
         img_W = img.shape[-1]
-        short_size = np.random.choice(short_edge_list)
-        scale = min(short_size / float(min(img_H, img_W)), output_W / float(max(img_H, img_W)))
+        # Random scale
+        scale = np.random.uniform(0.5, 2)
         target_H, target_W = int(img_H * scale), int(img_W * scale)
         img = tr_F.resize(img, (target_H, target_W))
-        # place on zero tensors
-        img_bg = torch.zeros(img.shape[:-2] + size, dtype = img.dtype, device = img.device)
-        img_bg[:, 0:target_H, 0:target_W] = img
-        if len(target.shape) == 2:
-            # HxW?
-            target = target.reshape((1,) + target.shape)
-            target = tr_F.resize(target, (target_H, target_W), interpolation=torchvision.transforms.InterpolationMode.NEAREST)
-            target = target.reshape(target.shape[1:])
-            target_bg = torch.zeros(size, dtype = target.dtype, device = target.device)
-            target_bg[:target_H, :target_W] = target
-        else:
-            assert len(target.shape) == 3
-            target = tr_F.resize(target, (target_H, target_W), interpolation=torchvision.transforms.InterpolationMode.NEAREST)
-            target_bg = torch.zeros(target.shape[:-2] + size, dtype = target.dtype, device = target.device)
-            target_bg[:, :target_H, :target_W] = target
-        return (img_bg, target_bg)
+        assert len(target.shape) == 2
+        target = target.view((1,) + target.shape)
+        target = tr_F.resize(target, (target_H, target_W), interpolation=torchvision.transforms.InterpolationMode.NEAREST)
+        # Random crop
+        H_padding = int(max(0, np.ceil((output_H - target_H) / 2)))
+        W_padding = int(max(0, np.ceil((output_W - target_W) / 2)))
+        img = tr_F.pad(img, (W_padding, H_padding), 0, 'constant')
+        target = tr_F.pad(target, (W_padding, H_padding), 0, 'constant')
+        # Restore target label map to (H, W)
+        target = target.view(target.shape[1:])
+        start_x = random.randint(0, target.shape[1] - output_W)
+        start_y = random.randint(0, target.shape[0] - output_H)
+        img = img[:,start_y:start_y+output_H,start_x:start_x+output_W]
+        target = target[start_y:start_y+output_H,start_x:start_x+output_W]
+        return (img, target)
     return crop
 
 @joint_transforms_registry.register
