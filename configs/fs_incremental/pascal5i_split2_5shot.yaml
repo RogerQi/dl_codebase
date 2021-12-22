@@ -3,7 +3,7 @@ task: 'few_shot_incremental'
 input_dim: (3, 512, 512)
 num_classes: 16
 meta_training_num_classes: 16 # (15 annotated class in splitted training set + 1 background)
-meta_testing_num_classes: 2
+meta_testing_num_classes: 21
 save_model: True
 
 SYSTEM:
@@ -45,8 +45,7 @@ DATASET:
         crop_size: (512, 512)
 
 TRAIN:
-  max_epochs: 5
-  lr_max_epoch: 10
+  max_epochs: 10
   batch_size: 24
   initial_lr: 0.007
   lr_scheduler: "polynomial"
