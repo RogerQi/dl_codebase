@@ -93,29 +93,28 @@ class COCOSeg(datasets.vision.VisionDataset):
         return Image.open(img_fpath).convert('RGB')
     
     def _get_mask(self, img_id):
-        img_metadata = self.coco.loadImgs(img_id)[0]
-        annotations = self.coco.imgToAnns[img_id]
-        seg_mask = self._gen_seg_mask(annotations, img_metadata['height'], img_metadata['width'])
-        return seg_mask
+        img_desc = self.coco.imgs[img_id]
+        img_fname = img_desc['file_name']
+        label_fname = img_fname.replace('.jpg', '.png')
+        img_fpath = os.path.join(self.img_dir, label_fname)
+        return self._get_seg_mask(img_fpath)
     
     def __getitem__(self, idx: int):
         img_id = self.img_ids[idx]
         img = self._get_img(img_id)
         seg_mask = self._get_mask(img_id) # tensor
         return (img, seg_mask)
-    
-    def _gen_seg_mask(self, annotations, h, w):
-        seg_mask = torch.zeros((h, w), dtype=torch.int64)
-        for ann in annotations:
-            real_class_id = self.class_map[ann['category_id']]
-            ann_mask = torch.from_numpy(self.coco.annToMask(ann))
-            # mask indicating invalid regions
-            if ann['iscrowd'] or ann['area'] < self.min_area:
-                seg_mask[ann_mask > 0] = -1
-            else:
-                assert real_class_id > 0 and real_class_id <= 80
-                seg_mask = torch.max(seg_mask, ann_mask * real_class_id)
-        return seg_mask.long()
+
+    def _get_seg_mask(self, fname: str):
+        deleted_idx = [91, 83, 71, 69, 68, 66, 45, 30, 29, 26, 12]
+        raw_lbl = np.array(Image.open(fname)).astype(np.int)
+        ignore_idx = (raw_lbl == 255)
+        raw_lbl += 1
+        raw_lbl[raw_lbl > 91] = 0 # STUFF classes are mapped to background
+        for d_idx in deleted_idx:
+            raw_lbl[raw_lbl > d_idx] -= 1
+        raw_lbl[ignore_idx] = -1
+        return torch.tensor(raw_lbl)
     
     def get_class_map(self, class_id):
         return deepcopy((self.instance_class_map[class_id]))
