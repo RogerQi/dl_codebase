@@ -210,16 +210,3 @@ def get_continual_aug_train_set(cfg):
 def get_continual_test_set(cfg):
     ds = COCOSeg(COCO_PATH, False)
     return base_set(ds, "test", cfg)
-
-def get_sequential_continual_test_set(cfg):
-    # TODO: support other splits/sequential testing size
-    # 5 classes per step
-    exclusion_label_list = [i for i in range(61, 81)]
-    all_ds_list = []
-    for i in [61, 66, 71, 76]:
-        for j in range(5):
-            # 5 classes per step
-            exclusion_label_list.remove(i + j)
-        ds = PartialCOCOReader(COCO_PATH, False, exclusion_label_list)
-        all_ds_list.append(base_set(ds, "test", cfg))
-    return all_ds_list

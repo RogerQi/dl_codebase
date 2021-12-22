@@ -29,12 +29,6 @@ class sequential_GIFS_seg_trainer(GIFS_seg_trainer):
 
         self.continual_vanilla_train_set = dataset_module.get_continual_vanilla_train_set(cfg)
         self.continual_aug_train_set = dataset_module.get_continual_aug_train_set(cfg)
-        self.continual_test_set_list = dataset_module.get_sequential_continual_test_set(cfg)
-        
-        self.test_loader_list = []
-
-        for s in self.continual_test_set_list:
-            self.test_loader_list.append(torch.utils.data.DataLoader(s, batch_size=cfg.TEST.batch_size, shuffle=False, **self.loader_kwargs))
         
         self.partial_data_pool = {}
     
