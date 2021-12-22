@@ -37,7 +37,6 @@ DATASET:
         crop_size: (512, 512)
     TEST:
       transforms: ('normalize', )
-      joint_transforms: ('joint_naive_resize', )
       TRANSFORMS_DETAILS:
         NORMALIZE:
           mean: (0.485, 0.456, 0.406)
@@ -59,16 +58,16 @@ TASK_SPECIFIC:
   GIFS:
     fine_tuning: True
     pseudo_base_label: False
-    max_iter: 200
+    max_iter: 100
     num_shots: 1
     ft_batch_size: 10
-    backbone_lr: 1e-3
-    classifier_lr: 1e-2
+    backbone_lr: 1e-4
+    classifier_lr: 1e-3
     feature_reg_lambda: 0.5
     classifier_reg_lambda: 0.0
-    context_aware_sampling_prob: 0.6
+    context_aware_sampling_prob: 0.0
     sequential_dataset_num_classes: 5
-    baseset_type: 'far_close'
+    baseset_type: 'random'
     num_runs: 5
 
 TEST:
