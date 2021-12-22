@@ -68,19 +68,6 @@ class sequential_GIFS_seg_trainer(GIFS_seg_trainer):
         assert ptr == len(all_novel_class_idx)
 
         for i, task in enumerate(task_stream):
-            # Aggregate elements in support set
-            image_list = []
-            mask_list = []
-
-            for n_c in task:
-                for idx in support_set[n_c]:
-                    img_chw, mask_hw = self.continual_vanilla_train_set[idx]
-                    image_list.append(img_chw)
-                    mask_list.append(mask_hw)
-
-            supp_img_bchw = torch.stack(image_list)
-            supp_mask_bhw = torch.stack(mask_list)
-
             self.prv_backbone_net = deepcopy(self.backbone_net)
             self.prv_post_processor = deepcopy(self.post_processor)
             
@@ -93,12 +80,13 @@ class sequential_GIFS_seg_trainer(GIFS_seg_trainer):
                 # squeeze the classifier weights
                 self.prv_post_processor.pixel_classifier.class_mat.weight.data = self.prv_post_processor.pixel_classifier.class_mat.weight.data[base_class_idx]
 
-            self.novel_adapt(base_class_idx, task, supp_img_bchw, supp_mask_bhw)
+            self.novel_adapt(base_class_idx, task, support_set)
             learned_novel_class_idx += task
 
             # Evaluation
-            if i == len(task_stream) - 1:
-                classwise_iou = self.eval_on_loader(self.test_loader_list[i], total_num_classes)
+            # TODO: finalize and remove 'or True'.
+            if i == len(task_stream) - 1 or True:
+                classwise_iou = self.eval_on_loader(self.continual_test_loader, total_num_classes)
 
                 classwise_iou = np.array(classwise_iou)
 

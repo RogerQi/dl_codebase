@@ -1,26 +1,13 @@
 import random
 import numpy as np
-import matplotlib.pyplot as plt
 from copy import deepcopy
 from typing import List, Union
-
-import cv2
 import torch
-import torch.nn as nn
-import torch.optim as optim
-import torch.nn.functional as F
-import torchvision
-import torchvision.transforms.functional as tr_F
-from tqdm import tqdm, trange
-
-from backbone.deeplabv3_renorm import BatchRenorm2d
 
 import classifier
 import utils
 
 from .seg_trainer import seg_trainer
-
-from IPython import embed
 
 def harmonic_mean(base_iou, novel_iou):
     return 2 / (1. / base_iou + 1. / novel_iou)
@@ -72,7 +59,26 @@ class GIFS_seg_trainer(seg_trainer):
             torch.manual_seed(seed_list[i])
             support_set = {}
             for k in image_candidates.keys():
-                selected_idx = np.random.choice(image_candidates[k], size=(num_shots, ), replace=False)
+                assert len(image_candidates[k]) > num_shots, "fewer samples than num_shots?"
+                selected_idx = []
+                iter_cnt = 0
+                for _ in range(num_shots):
+                    idx = random.choice(image_candidates[k])
+                    while True:
+                        iter_cnt += 1
+                        if iter_cnt > num_shots + 20:
+                            raise ValueError("Malformed image candidates?")
+                        novel_img_chw, mask_hw = self.continual_vanilla_train_set[idx]
+                        pixel_sum = torch.sum(mask_hw == k)
+                        assert pixel_sum > 0, f"Sample {idx} does not contain class {k}"
+                        # If the selected sample is bad (more than 1px) and has not been selected,
+                        # we choose the example.
+                        if pixel_sum != 1 and idx not in selected_idx:
+                            selected_idx.append(idx)
+                            break
+                        else:
+                            idx = random.choice(image_candidates[k])
+                assert len(selected_idx) == num_shots
                 support_set[k] = list(selected_idx)
         
             # get per-class IoU on the entire validation set based on results from the support set
@@ -99,7 +105,7 @@ class GIFS_seg_trainer(seg_trainer):
         print("Harmonic IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_harm_iou_list), np.std(run_harm_iou_list)))
         print("Total IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_total_iou_list), np.std(run_total_iou_list)))
     
-    def classifier_weight_imprinting(self, base_id_list: List[int], novel_id_list: List[int], supp_img_bchw: torch.Tensor, supp_mask_bhw: torch.Tensor):
+    def classifier_weight_imprinting(self, base_id_list: List[int], novel_id_list: List[int], support_set: dict):
         """Use masked average pooling to initialize a new 1x1 convolutional HEAD for semantic segmentation
 
         The resulting classifier will produce per-pixel classification from class 0 (usually background)
@@ -119,7 +125,8 @@ class GIFS_seg_trainer(seg_trainer):
         """
         assert self.prv_backbone_net is not None
         assert self.prv_post_processor is not None
-        max_cls = max(max(base_id_list), max(novel_id_list)) + 1
+        max_cls = self.cfg.meta_testing_num_classes
+        assert max_cls >= max(max(base_id_list), max(novel_id_list)) + 1
         assert self.prv_post_processor.pixel_classifier.class_mat.weight.data.shape[0] == len(base_id_list)
 
         ori_cnt = 0
@@ -127,20 +134,19 @@ class GIFS_seg_trainer(seg_trainer):
         for c in range(max_cls):
             if c in novel_id_list:
                 # Aggregate all candidates in support set
-                image_list = []
-                mask_list = []
-                for b in range(supp_img_bchw.shape[0]):
-                    if c in supp_mask_bhw[b]:
-                        image_list.append(supp_img_bchw[b])
-                        mask_list.append(supp_mask_bhw[b])
-                assert image_list, "no novel example found"
-                assert mask_list, "no novel example found"
-                # novel class. Use MAP to initialize weight
-                supp_img_bchw_tensor = torch.stack(image_list).cuda()
-                supp_mask_bhw_tensor = torch.stack(mask_list).cuda()
-                with torch.no_grad():
-                    support_feature = self.prv_backbone_net(supp_img_bchw_tensor)
-                    class_weight_vec = utils.masked_average_pooling(supp_mask_bhw_tensor == c, support_feature, True)
+                vec_list = [] # store MAP result for every image
+                assert c in support_set
+                for idx in support_set[c]:
+                    img_chw, mask_hw = self.continual_vanilla_train_set[idx]
+                    # novel class. Use MAP to initialize weight
+                    supp_img_bchw_tensor = img_chw.view((1,) + img_chw.shape).cuda()
+                    supp_mask_bhw_tensor = mask_hw.view((1,) + mask_hw.shape).cuda()
+                    assert c in supp_mask_bhw_tensor
+                    with torch.no_grad():
+                        support_feature = self.prv_backbone_net(supp_img_bchw_tensor)
+                        class_weight_vec = utils.masked_average_pooling(supp_mask_bhw_tensor == c, support_feature, True)
+                        vec_list.append(class_weight_vec)
+                class_weight_vec = torch.mean(torch.stack(vec_list), dim=0)
             elif c in base_id_list:
                 # base class. Copy weight from learned HEAD
                 class_weight_vec = self.prv_post_processor.pixel_classifier.class_mat.weight.data[ori_cnt]
@@ -154,134 +160,20 @@ class GIFS_seg_trainer(seg_trainer):
         classifier_weights = torch.stack(class_weight_vec_list) # num_classes x C x 1 x 1
         return classifier_weights
     
-    def finetune_backbone(self, base_class_idx, novel_class_idx, supp_img_bchw, supp_mask_bhw):
-        assert self.prv_backbone_net is not None
-        assert self.prv_post_processor is not None
-
-        self.backbone_net.train()
-        self.post_processor.train()
-
-        trainable_params = [
-            {"params": self.backbone_net.parameters()},
-            {"params": self.post_processor.parameters(), "lr": self.cfg.TASK_SPECIFIC.GIFS.classifier_lr}
-        ]
-
-        # Freeze batch norm statistics
-        for module in self.backbone_net.modules():
-            if isinstance(module, nn.BatchNorm2d) or isinstance(module, BatchRenorm2d):
-                if hasattr(module, 'weight'):
-                    module.weight.requires_grad_(False)
-                if hasattr(module, 'bias'):
-                    module.bias.requires_grad_(False)
-                module.eval()
-
-        optimizer = optim.SGD(trainable_params, lr = self.cfg.TASK_SPECIFIC.GIFS.backbone_lr, momentum = 0.9)
-        
-        max_iter = self.cfg.TASK_SPECIFIC.GIFS.max_iter
-        def polynomial_schedule(epoch):
-            return (1 - epoch / max_iter)**0.9
-        batch_size = self.cfg.TASK_SPECIFIC.GIFS.ft_batch_size
-
-        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, polynomial_schedule)
-
-        l2_criterion = nn.MSELoss()
-
-        with trange(1, max_iter + 1, dynamic_ncols=True) as t:
-            for iter_i in t:
-                shuffled_idx = torch.randperm(supp_img_bchw.shape[0])[:batch_size]
-                image_list = []
-                mask_list = []
-                for idx in shuffled_idx:
-                    # Use augmented examples here.
-                    img_chw = supp_img_bchw[idx]
-                    mask_hw = supp_mask_bhw[idx]
-                    if torch.rand(1) < 0.5:
-                        img_chw = tr_F.hflip(img_chw)
-                        mask_hw = tr_F.hflip(mask_hw)
-                    image_list.append(img_chw)
-                    mask_list.append(mask_hw)
-                data_bchw = torch.stack(image_list).cuda()
-                target_bhw = torch.stack(mask_list).cuda()
-                feature = self.backbone_net(data_bchw)
-                ori_spatial_res = data_bchw.shape[-2:]
-                output = self.post_processor(feature, ori_spatial_res, scale_factor=10)
-
-                # L2 regularization on feature extractor
-                with torch.no_grad():
-                    ori_feature = self.prv_backbone_net(data_bchw)
-                    ori_logit = self.prv_post_processor(ori_feature, ori_spatial_res, scale_factor=10)
-
-                if self.cfg.TASK_SPECIFIC.GIFS.pseudo_base_label:
-                    novel_mask = torch.zeros_like(target_bhw)
-                    for novel_idx in novel_class_idx:
-                        novel_mask = torch.logical_or(novel_mask, target_bhw == novel_idx)
-                    tmp_target_bhw = output.max(dim = 1)[1]
-                    tmp_target_bhw[novel_mask] = target_bhw[novel_mask]
-                    target_bhw = tmp_target_bhw
-
-                loss = self.criterion(output, target_bhw)
-
-                # Feature extractor regularization + classifier regularization
-                regularization_loss = l2_criterion(feature, ori_feature)
-                regularization_loss = regularization_loss * self.cfg.TASK_SPECIFIC.GIFS.feature_reg_lambda # hyperparameter lambda
-                loss = loss + regularization_loss
-                # L2 regulalrization on base classes
-                clf_loss = l2_criterion(output[:,base_class_idx,:,:], ori_logit) * self.cfg.TASK_SPECIFIC.GIFS.classifier_reg_lambda
-                loss = loss + clf_loss
-
-                optimizer.zero_grad() # reset gradient
-                loss.backward()
-                optimizer.step()
-                scheduler.step()
-                t.set_description_str("Loss: {:.4f}".format(loss.item()))
+    def finetune_backbone(self, base_class_idx, novel_class_idx, support_set):
+        raise NotImplementedError
     
     def continual_test_single_pass(self, support_set):
-        self.prv_backbone_net = deepcopy(self.backbone_net)
-        self.prv_post_processor = deepcopy(self.post_processor)
-        
-        self.prv_backbone_net.eval()
-        self.prv_post_processor.eval()
-        self.backbone_net.eval()
-        self.post_processor.eval()
-
-        n_base_classes = self.prv_post_processor.pixel_classifier.class_mat.weight.data.shape[0]
-        n_novel_classes = len(support_set.keys())
-        num_classes = n_base_classes + n_novel_classes
-
-        novel_class_idx = sorted(list(support_set.keys()))
-        base_class_idx = [i for i in range(num_classes) if i not in novel_class_idx]
-
-        # Aggregate elements in support set
-        image_list = []
-        mask_list = []
-
-        for c in support_set:
-            for idx in support_set[c]:
-                img_chw, mask_hw = self.continual_vanilla_train_set[idx]
-                image_list.append(img_chw)
-                mask_list.append(mask_hw)
-        supp_img_bchw = torch.stack(image_list)
-        supp_mask_bhw = torch.stack(mask_list)
-
-        self.novel_adapt(base_class_idx, novel_class_idx, supp_img_bchw, supp_mask_bhw)
-
-        # Evaluation
-        metric = self.eval_on_loader(self.continual_test_loader, num_classes)
-
-        # Restore weights
-        self.backbone_net = self.prv_backbone_net
-        self.post_processor = self.prv_post_processor
-
-        return metric
+        raise NotImplementedError
     
-    def novel_adapt(self, base_class_idx, novel_class_idx, supp_img_bchw, supp_mask_bhw):
+    def novel_adapt(self, base_class_idx, novel_class_idx, support_set):
         max_cls = max(max(base_class_idx), max(novel_class_idx)) + 1
         self.post_processor = classifier.dispatcher(self.cfg, self.feature_shape, num_classes=max_cls)
         self.post_processor = self.post_processor.to(self.device)
         # Aggregate weights
-        aggregated_weights = self.classifier_weight_imprinting(base_class_idx, novel_class_idx, supp_img_bchw, supp_mask_bhw)
+        aggregated_weights = self.classifier_weight_imprinting(base_class_idx, novel_class_idx, support_set)
         self.post_processor.pixel_classifier.class_mat.weight.data = aggregated_weights
 
         # Optimization over support set to fine-tune initialized vectors
         if self.cfg.TASK_SPECIFIC.GIFS.fine_tuning:
-            self.finetune_backbone(base_class_idx, novel_class_idx, supp_img_bchw, supp_mask_bhw)
+            self.finetune_backbone(base_class_idx, novel_class_idx, support_set)
