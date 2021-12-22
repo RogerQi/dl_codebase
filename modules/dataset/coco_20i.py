@@ -12,15 +12,21 @@ from .coco import COCOSeg
 
 COCO_PATH = os.path.join(utils.get_dataset_root(), "COCO2017")
 
+novel_dict = {
+    0: [1, 5, 9, 13, 17, 21, 25, 29, 33, 37, 41, 45, 49, 53, 57, 61, 65, 69, 73, 77],
+    1: [2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54, 58, 62, 66, 70, 74, 78],
+    2: [3, 7, 11, 15, 19, 23, 27, 31, 35, 39, 43, 47, 51, 55, 59, 63, 67, 71, 75, 79],
+    3: [4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64, 68, 72, 76, 80]
+}
+
 class COCO20iReader(torchvision.datasets.vision.VisionDataset):
-    def __init__(self, root, fold, base_stage, split, exclude_novel=False, vanilla_label=False):
+    def __init__(self, root, fold, split, exclude_novel=False, vanilla_label=False):
         """
         pascal_5i dataset reader
 
         Parameters:
             - root:  root to data folder containing SBD and VOC2012 dataset. See README.md for details
             - fold:  folding index as in OSLSM (https://arxiv.org/pdf/1709.03410.pdf)
-            - base_stage: a bool flag to indicate whether L_{train} or L_{test} should be used
             - split: Specify train/val split of VOC2012 dataset to read from. True indicates training
             - exclude_novel: boolean flag to indicate whether novel examples are removed or masked.
                 There are two cases:
@@ -34,11 +40,9 @@ class COCO20iReader(torchvision.datasets.vision.VisionDataset):
         super(COCO20iReader, self).__init__(root, None, None, None)
         assert fold >= 0 and fold <= 3
         assert split in [True, False]
-        assert base_stage
         if vanilla_label:
             assert exclude_novel
         self.vanilla_label = vanilla_label
-        self.base_stage = base_stage
 
         # Get augmented VOC dataset
         self.vanilla_ds = COCOSeg(root, split)
@@ -46,19 +50,15 @@ class COCO20iReader(torchvision.datasets.vision.VisionDataset):
 
         # Split dataset based on folding. Refer to https://arxiv.org/pdf/1709.03410.pdf
         # Given fold number, define L_{test}
-        self.val_label_set = [i for i in range(fold * 20 + 1, fold * 20 + 21)]
+        self.val_label_set = novel_dict[fold]
         self.train_label_set = [i for i in range(
             1, 81) if i not in self.val_label_set]
         
-        if self.base_stage:
-            self.visible_labels = self.train_label_set
-            self.invisible_labels = self.val_label_set
-        else:
-            self.visible_labels = self.val_label_set
-            self.invisible_labels = self.train_label_set
+        self.visible_labels = self.train_label_set
+        self.invisible_labels = self.val_label_set
         
         # Pre-training or meta-training
-        if exclude_novel and self.base_stage:
+        if exclude_novel:
             # Exclude images containing invisible classes and use rest
             novel_examples_list = []
             for label in self.invisible_labels:
@@ -86,6 +86,16 @@ class COCO20iReader(torchvision.datasets.vision.VisionDataset):
             for subset_i, real_idx in enumerate(self.subset_idx):
                 if real_idx in real_class_map_lut:
                     self.class_map[c].append(subset_i)
+        
+        self.remap_dict = {}
+        map_idx = 1
+        for c in range(1, 81):
+            if c in self.val_label_set:
+                self.remap_dict[c] = 0 # novel classes are masked as background
+            else:
+                assert c in self.train_label_set
+                self.remap_dict[c] = map_idx
+                map_idx += 1
     
     def __len__(self):
         return len(self.subset_idx)
@@ -121,21 +131,14 @@ class COCO20iReader(torchvision.datasets.vision.VisionDataset):
             - Offseted and masked segmentation mask
         """
         # Use the property that validation label split is contiguous to accelerate
-        min_val_label = min(self.val_label_set)
-        max_val_label = max(self.val_label_set)
-        if self.base_stage:
-            greater_pixel_idx = (target_tensor > max_val_label)
-            novel_pixel_idx = torch.logical_and(target_tensor >= min_val_label, torch.logical_not(greater_pixel_idx))
-            target_tensor[novel_pixel_idx] = 0
-            target_tensor[greater_pixel_idx] -= len(self.val_label_set)
-        else:
-            lesser_pixel_idx = (target_tensor < min_val_label)
-            greater_pixel_idx = (target_tensor > max_val_label)
-            ignore_pixel_idx = (target_tensor == -1)
-            target_tensor = target_tensor - (min_val_label - 1) # min_vis_label => 1 after this step
-            target_tensor[lesser_pixel_idx] = 0
-            target_tensor[greater_pixel_idx] = 0
-            target_tensor[ignore_pixel_idx] = -1
+        label_set = torch.unique(target_tensor)
+        for l in label_set:
+            l = int(l)
+            if l == 0 or l == -1:
+                continue # background and ignore_label are unchanged
+            src_label = l
+            target_label = self.remap_dict[l]
+            target_tensor[target_tensor == src_label] = target_label
         return target_tensor
 
 class PartialCOCOReader(torchvision.datasets.vision.VisionDataset):
@@ -183,28 +186,18 @@ class PartialCOCOReader(torchvision.datasets.vision.VisionDataset):
 
 def get_train_set(cfg):
     folding = cfg.DATASET.COCO20i.folding
-    ds = COCO20iReader(COCO_PATH, folding, True, True, exclude_novel=True)
+    ds = COCO20iReader(COCO_PATH, folding, True, exclude_novel=True)
     return base_set(ds, "train", cfg)
 
 def get_train_set_vanilla_label(cfg):
     folding = cfg.DATASET.COCO20i.folding
-    ds = COCO20iReader(COCO_PATH, folding, True, True, exclude_novel=True, vanilla_label=True)
+    ds = COCO20iReader(COCO_PATH, folding, True, exclude_novel=True, vanilla_label=True)
     return base_set(ds, "train", cfg)
 
 def get_val_set(cfg):
     folding = cfg.DATASET.COCO20i.folding
-    ds = COCO20iReader(COCO_PATH, folding, True, False, exclude_novel=False)
+    ds = COCO20iReader(COCO_PATH, folding, False, exclude_novel=False)
     return base_set(ds, "test", cfg)
-
-# def get_meta_train_set(cfg):
-#     folding = cfg.DATASET.COCO20i.folding
-#     ds = COCO20iReader(COCO_PATH, folding, True, True, exclude_novel=False)
-#     return base_set(ds, "train", cfg)
-
-# def get_meta_test_set(cfg):
-#     folding = cfg.DATASET.COCO20i.folding
-#     ds = COCO20iReader(COCO_PATH, folding, False, False, exclude_novel=False)
-#     return base_set(ds, "test", cfg)
 
 def get_continual_vanilla_train_set(cfg):
     ds = COCOSeg(COCO_PATH, True)
