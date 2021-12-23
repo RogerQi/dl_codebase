@@ -19,10 +19,6 @@ TODOs
         - Focal Loss
         - More Imbalanced Loss/or combiner
 - Update README docs in each folder
-- Add model saving logic
-    - Computation Graph + Weights
-    - Just weights
-    - Feature Extraction
 - Add transforms foolproof sanity checker
     - consistency of normalization in train/test set
     - normalization should only happen at the end of transforms
@@ -36,4 +32,3 @@ TODOs
     - Batch random resizing augmentation
     - encoder/decoder design
     - deep supervision
-- Extend yaml reading to support inheriting from another YAML file
