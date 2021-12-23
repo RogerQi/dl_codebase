@@ -23,6 +23,7 @@ def parse_args():
     parser.add_argument('--webcam', help='real-time evaluate using default webcam', action='store_true')
     parser.add_argument('--visfreq', help="visualize results for every n examples in test set",
         required=False, default=99999999999, type=int)
+    parser.add_argument("--opts", help="Command line options to overwrite configs", default=[], nargs=argparse.REMAINDER)
     args = parser.parse_args()
 
     return args

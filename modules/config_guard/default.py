@@ -1,5 +1,6 @@
 import os
 import yaml
+from copy import deepcopy
 
 from yacs.config import CfgNode as CN
 
@@ -200,8 +201,16 @@ def update_config_from_yaml(cfg, args):
 
     cfg.defrost()
 
+    # Iteratively load YAML configs
     for cfg_path in yaml_load_list:
         cfg.merge_from_file(cfg_path)
+    
+    # Command line options have highest priorities
+    if args.opts:
+        # empty by default
+        old_cfg = deepcopy(cfg)
+        cfg.merge_from_list(args.opts)
+        assert cfg != old_cfg, "Unused command line options provided!"
 
     cfg.freeze()
 

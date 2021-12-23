@@ -20,6 +20,7 @@ def parse_args():
     parser.add_argument('--cfg', help = "specify particular yaml configuration to use", required = True,
         default = "configs/mnist_torch_official.yaml", type = str)
     parser.add_argument('--resume', help = "resume training from checkpoint", required=False, default = "NA", type = str)
+    parser.add_argument("--opts", help="Command line options to overwrite configs", default=[], nargs=argparse.REMAINDER)
     args = parser.parse_args()
 
     return args
