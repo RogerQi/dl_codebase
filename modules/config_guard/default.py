@@ -1,5 +1,5 @@
 import os
-import sys
+import yaml
 
 from yacs.config import CfgNode as CN
 
@@ -11,6 +11,7 @@ from yacs.config import CfgNode as CN
 # Root Config Node
 #######################
 _C = CN()
+_C.BASE_YAML = "__BASE__YAML__"
 _C.name = "Experiment Name"
 _C.seed = 1221
 _C.task = "classification"
@@ -177,13 +178,30 @@ _C.TASK_SPECIFIC.GIFS.num_runs = -1
 # | End Default Config
 # ---------------------------
 
+BASE_KEY = "__BASE__YAML__"
+
 def update_config_from_yaml(cfg, args):
     '''
     Update yacs config using yaml file
     '''
+    loop_cnt = 0
+    yaml_load_list = [args.cfg]
+    cur_cfg_path = args.cfg
+    with open(args.cfg) as f: cur_cfg = yaml.safe_load(f)
+    while 'BASE_YAML' in cur_cfg and cur_cfg['BASE_YAML'] != BASE_KEY:
+        cur_cfg_path = os.path.join(os.path.dirname(cur_cfg_path), cur_cfg['BASE_YAML'])
+        with open(cur_cfg_path) as f:
+            cur_cfg = yaml.safe_load(f)
+        yaml_load_list.append(cur_cfg_path)
+        loop_cnt += 1
+        if loop_cnt > 1000:
+            raise ValueError(f"Recursed over 1000 YAML. Did I get stuck in recursion? {yaml_load_list}")
+    yaml_load_list = yaml_load_list[::-1] # reverse
+
     cfg.defrost()
 
-    cfg.merge_from_file(args.cfg)
+    for cfg_path in yaml_load_list:
+        cfg.merge_from_file(cfg_path)
 
     cfg.freeze()
 
