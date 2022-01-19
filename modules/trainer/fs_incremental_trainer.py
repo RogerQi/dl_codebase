@@ -37,6 +37,29 @@ class kd_criterion(nn.Module):
         element_wise_loss = x_ref * torch.log(x_pred)
         return -torch.mean(element_wise_loss)
 
+class KnowledgeDistillationLoss(nn.Module):
+    def __init__(self, reduction='mean', alpha=1.):
+        super().__init__()
+        self.reduction = reduction
+        self.alpha = alpha
+
+    def forward(self, inputs, targets):
+        inputs = inputs.narrow(1, 0, targets.shape[1])
+
+        outputs = torch.log_softmax(inputs, dim=1)
+        labels = torch.softmax(targets / self.alpha, dim=1)
+
+        loss = -(outputs * labels).mean(dim=1) * (self.alpha ** 2)
+
+        if self.reduction == 'mean':
+            outputs = torch.mean(loss)
+        elif self.reduction == 'sum':
+            outputs = torch.sum(loss)
+        else:
+            outputs = loss
+
+        return outputs
+
 memory_bank_size = 500
 
 class fs_incremental_trainer(sequential_GIFS_seg_trainer):
@@ -238,16 +261,6 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
 
         return (syn_img_chw, syn_mask_hw)
     
-    def load_model(self, file_path):
-        """Load weights for default model components (backbone_net, post_process) from a given file path
-
-        Args:
-            file_path (str): path to trained weights
-        """
-        trained_weight_dict = torch.load(file_path, map_location=self.device)
-        self.backbone_net.load_state_dict(trained_weight_dict['backbone'], strict=True)
-        self.post_processor.load_state_dict(trained_weight_dict['head'], strict=True)
-    
     def get_scene_embedding(self, img):
         '''
         img: normalized image tensor of shape CHW
@@ -323,6 +336,8 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         assert self.prv_backbone_net is not None
         assert self.prv_post_processor is not None
 
+        print(f"Adapting to novel id {novel_class_idx}")
+
         if self.context_aware_prob > 0:
             self.context_similar_map = {}
 
@@ -330,20 +345,6 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
             assert novel_obj_id in support_set
             for idx in support_set[novel_obj_id]:
                 novel_img_chw, mask_hw = self.continual_vanilla_train_set[idx]
-                if False:
-                    # Mask non-novel portion using pseudo labels
-                    # TODO: rewrite using support_set
-                    novel_mask = torch.zeros_like(supp_mask_bhw[b])
-                    novel_mask = torch.logical_or(novel_mask, supp_mask_bhw[b] == novel_obj_id)
-                    with torch.no_grad():
-                        data_bchw = supp_img_bchw[b].cuda()
-                        data_bchw = data_bchw.view((1,) + data_bchw.shape)
-                        feature = self.prv_backbone_net(data_bchw)
-                        ori_spatial_res = data_bchw.shape[-2:]
-                        output = self.prv_post_processor(feature, ori_spatial_res, scale_factor=10)
-                    tmp_target_hw = output.max(dim = 1)[1].cpu()[0]
-                    tmp_target_hw[novel_mask] = supp_mask_bhw[b][novel_mask]
-                    supp_mask_bhw[b] = tmp_target_hw
                 
                 # Compute cosine embedding
                 if self.context_aware_prob > 0:
@@ -421,7 +422,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, polynomial_schedule)
 
         l2_criterion = nn.MSELoss()
-        my_kd_criterion = kd_criterion()
+        my_kd_criterion = KnowledgeDistillationLoss()
 
         # Save vanilla self.post_processor (after MAP) for prototype distillation
         post_processor_distillation_ref = deepcopy(self.post_processor)
@@ -439,12 +440,23 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                         mask_list.append(mask_hw)
                     else:
                         # full mask
-                        idx = np.random.randint(supp_img_bchw.shape[0])
-                        img_chw = supp_img_bchw[idx]
-                        mask_hw = supp_mask_bhw[idx]
-                        if torch.rand(1) < 0.5:
-                            img_chw = tr_F.hflip(img_chw)
-                            mask_hw = tr_F.hflip(mask_hw)
+                        chosen_cls = random.choice(list(novel_class_idx))
+                        idx = random.choice(support_set[chosen_cls])
+                        img_chw, mask_hw = self.continual_aug_train_set[idx]
+                        if False:
+                            # Mask non-novel portion using pseudo labels
+                            with torch.no_grad():
+                                data_bchw = img_chw.cuda()
+                                data_bchw = data_bchw.view((1,) + data_bchw.shape)
+                                feature = self.prv_backbone_net(data_bchw)
+                                ori_spatial_res = data_bchw.shape[-2:]
+                                output = self.prv_post_processor(feature, ori_spatial_res, scale_factor=10)
+                            tmp_target_hw = output.max(dim = 1)[1].cpu()[0]
+                            for novel_obj_id in support_set.keys():
+                                novel_mask = torch.zeros_like(mask_hw)
+                                novel_mask = torch.logical_or(novel_mask, mask_hw == novel_obj_id)
+                            tmp_target_hw[novel_mask] = mask_hw[novel_mask]
+                            mask_hw = tmp_target_hw
                         image_list.append(img_chw)
                         mask_list.append(mask_hw)
                 data_bchw = torch.stack(image_list).cuda().detach()
@@ -465,15 +477,10 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                 regularization_loss = l2_criterion(feature, ori_feature)
                 regularization_loss = regularization_loss * self.cfg.TASK_SPECIFIC.GIFS.feature_reg_lambda # hyperparameter lambda
                 loss = loss + regularization_loss
-                # L2 regulalrization on base classes
-                # TODO: to be removed
-                if True:
-                    with torch.no_grad():
-                        distill_output = post_processor_distillation_ref(ori_feature, ori_spatial_res, scale_factor=10)
-                    clf_loss = my_kd_criterion(output, distill_output) * self.cfg.TASK_SPECIFIC.GIFS.classifier_reg_lambda
-                else:
-                    # regularization on output logits
-                    clf_loss = l2_criterion(output[:,base_class_idx,:,:], ori_logit) * self.cfg.TASK_SPECIFIC.GIFS.classifier_reg_lambda
+                # PD Loss from PIFS
+                with torch.no_grad():
+                    distill_output = post_processor_distillation_ref(ori_feature, ori_spatial_res, scale_factor=10)
+                clf_loss = my_kd_criterion(output, distill_output) * self.cfg.TASK_SPECIFIC.GIFS.classifier_reg_lambda
                 loss = loss + clf_loss
 
                 optimizer.zero_grad() # reset gradient

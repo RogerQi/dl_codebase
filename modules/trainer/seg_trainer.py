@@ -59,7 +59,7 @@ class seg_trainer(trainer_base):
     def test_one(self, device):
         return self.val_one(device)
     
-    def eval_on_loader(self, test_loader, num_classes, visfreq=99999999):
+    def eval_on_loader(self, test_loader, num_classes, visfreq=99999999, masked_class=None):
         self.backbone_net.eval()
         self.post_processor.eval()
         test_loss = 0
@@ -74,12 +74,12 @@ class seg_trainer(trainer_base):
                 output = self.post_processor(feature, ori_spatial_res)
                 test_loss += self.criterion(output, target).item()  # sum up batch loss
                 pred_map = output.max(dim = 1)[1]
-                batch_acc, _ = utils.compute_pixel_acc(pred_map, target, fg_only=self.cfg.METRIC.SEGMENTATION.fg_only)
+                batch_acc, _ = utils.compute_pixel_acc(pred_map, target, fg_only=self.cfg.METRIC.SEGMENTATION.fg_only, masked_class=masked_class)
                 pixel_acc_list.append(float(batch_acc))
                 for i in range(pred_map.shape[0]):
                     pred_np = np.array(pred_map[i].cpu())
                     target_np = np.array(target[i].cpu(), dtype=np.int64)
-                    intersection, union = utils.compute_iu(pred_np, target_np, num_classes)
+                    intersection, union = utils.compute_iu(pred_np, target_np, num_classes, masked_class=masked_class)
                     if class_intersection is None:
                         class_intersection = intersection
                         class_union = union

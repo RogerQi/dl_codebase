@@ -1,46 +1,48 @@
+from typing import List
+from cv2 import getValidDisparityROI
 import numpy as np
+import torch
 import matplotlib.pyplot as plt
 
 from IPython import embed
 
-def compute_pixel_acc(pred, label, fg_only=True):
-    '''
-    pred: BHW
-    label: BHW
-    '''
-    assert pred.shape == label.shape
+IGNORE_LABEL = -1
+
+def get_valid_mask(gt_arr, fg_only, masked_class):
+    valid_mask = (gt_arr != IGNORE_LABEL)
     if fg_only:
-        valid = (label > 0)
-        acc_sum = (valid * (pred == label)).sum()
-        valid_sum = valid.sum()
-        acc = float(acc_sum) / (valid_sum + 1e-10)
-        return acc, valid_sum
-    else:
-        acc_sum = (pred == label).sum()
-        acc = float(acc_sum) / (np.prod(pred.shape))
-        return acc, 0
+        if isinstance(gt_arr, torch.Tensor):
+            valid_mask = torch.logical_and(valid_mask, gt_arr > 0)
+        elif isinstance(gt_arr, np.ndarray):
+            valid_mask = np.logical_and(valid_mask, gt_arr > 0)
+        else:
+            raise NotImplementedError
+    if masked_class is not None:
+        assert isinstance(masked_class, List)
+        for masked_c in masked_class:
+            if isinstance(gt_arr, torch.Tensor):
+                valid_mask = torch.logical_and(valid_mask, gt_arr != masked_c)
+            elif isinstance(gt_arr, np.ndarray):
+                valid_mask = np.logical_and(valid_mask, gt_arr != masked_c)
+            else:
+                raise NotImplementedError
+    return valid_mask
 
-def compute_binary_precision(pred, label):
+def compute_pixel_acc(pred, label, fg_only=True, masked_class=None):
     '''
     pred: BHW
     label: BHW
     '''
     assert pred.shape == label.shape
-    tp = np.logical_and(pred == 1, label == 1).sum()
-    fp = np.logical_and(pred == 1, label == 0).sum()
-    return tp * 1.0 / (tp + fp + 1e-15)
+    valid_mask = get_valid_mask(label, fg_only, masked_class)
+    pred = pred[valid_mask]
+    label = label[valid_mask]
+    correct_sum = (pred == label).sum()
+    valid_sum = valid_mask.sum()
+    acc = float(correct_sum) / (valid_sum + 1e-10)
+    return acc, valid_sum
 
-def compute_binary_recall(pred, label):
-    '''
-    pred: BHW
-    label: BHW
-    '''
-    assert pred.shape == label.shape
-    tp = np.logical_and(pred == 1, label == 1).sum()
-    fn = np.logical_and(pred == 0, label == 1).sum()
-    return tp * 1.0 / (tp + fn + 1e-15)
-
-def compute_iou(pred_map, label_map, num_classes, fg_only=True, ignore_mask=True):
+def compute_iou(pred_map, label_map, num_classes, fg_only=False, ignore_mask=True, masked_class=None):
     """
     Param
         - ignore_mask: set to True if there are targets to be ignored. Pixels whose value equal to 255
@@ -52,7 +54,7 @@ def compute_iou(pred_map, label_map, num_classes, fg_only=True, ignore_mask=True
     assert pred_map.shape == label_map.shape
 
     if ignore_mask:
-        valid_idx = (label_map != -1)
+        valid_idx = get_valid_mask(label_map, fg_only, masked_class)
         pred_map = pred_map[valid_idx]
         label_map = label_map[valid_idx]
 
@@ -78,7 +80,7 @@ def compute_iou(pred_map, label_map, num_classes, fg_only=True, ignore_mask=True
     else:
         return np.sum(area_intersection) / np.sum(area_union)
 
-def compute_iu(pred_map, label_map, num_classes, ignore_mask=True):
+def compute_iu(pred_map, label_map, num_classes, fg_only=False, ignore_mask=True, masked_class=None):
     """
     Param
         - ignore_mask: set to True if there are targets to be ignored. Pixels whose value equal to 255
@@ -90,7 +92,7 @@ def compute_iu(pred_map, label_map, num_classes, ignore_mask=True):
     assert pred_map.shape == label_map.shape
 
     if ignore_mask:
-        valid_idx = (label_map != -1)
+        valid_idx = get_valid_mask(label_map, fg_only, masked_class)
         pred_map = pred_map[valid_idx]
         label_map = label_map[valid_idx]
 
@@ -110,4 +112,7 @@ def compute_iu(pred_map, label_map, num_classes, ignore_mask=True):
     (area_lab, _) = np.histogram(label_map, bins=num_classes, range=(1, num_classes))
     area_union = area_pred + area_lab - area_intersection
 
-    return (area_intersection[1:], area_union[1:])
+    if fg_only:
+        return (area_intersection[1:], area_union[1:])
+    else:
+        return (area_intersection, area_union)
