@@ -1,4 +1,4 @@
-name: 'GIFS_coco20i_split1_renorm'
+name: 'GIFS_coco20i_base'
 task: 'few_shot_incremental'
 input_dim: (3, 512, 512)
 num_classes: 61
@@ -25,7 +25,7 @@ LOSS:
 DATASET:
   dataset: 'coco_20i'
   COCO20i:
-    folding: 1
+    folding: 999
   TRANSFORM:
     TRAIN:
       transforms: ('normalize', )
@@ -54,6 +54,7 @@ TRAIN:
     momentum: 0.9
     weight_decay: 1e-4
 
+# GIFS
 TASK_SPECIFIC:
   GIFS:
     fine_tuning: True
@@ -69,6 +70,23 @@ TASK_SPECIFIC:
     sequential_dataset_num_classes: 5
     baseset_type: 'random'
     num_runs: 5
+
+# PIFS
+# TASK_SPECIFIC:
+#   GIFS:
+#     fine_tuning: True
+#     pseudo_base_label: False
+#     max_iter: 100
+#     num_shots: 5
+#     ft_batch_size: 10
+#     backbone_lr: 1e-3
+#     classifier_lr: 1e-3
+#     feature_reg_lambda: 0.0
+#     classifier_reg_lambda: 10.0
+#     context_aware_sampling_prob: 0.0
+#     sequential_dataset_num_classes: 5
+#     baseset_type: 'random'
+#     num_runs: 5
 
 TEST:
   batch_size: 1

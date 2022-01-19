@@ -87,8 +87,7 @@ class GIFS_seg_trainer(seg_trainer):
             novel_iou_list = []
             base_iou_list = []
             for i in range(len(classwise_iou)):
-                label = i + 1 # 0-indexed
-                if label in testing_label_candidates:
+                if i in testing_label_candidates:
                     novel_iou_list.append(classwise_iou[i])
                 else:
                     base_iou_list.append(classwise_iou[i])
