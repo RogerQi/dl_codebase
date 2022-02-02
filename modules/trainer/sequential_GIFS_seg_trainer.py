@@ -16,7 +16,6 @@ import classifier
 import utils
 
 from .GIFS_seg_trainer import GIFS_seg_trainer
-from dataset.special_loader import get_fs_seg_loader
 
 from IPython import embed
 

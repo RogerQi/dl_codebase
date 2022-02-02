@@ -71,6 +71,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         self.demo_pool = {}
 
         self.train_set_vanilla_label = dataset_module.get_train_set_vanilla_label(cfg)
+        self.vanilla_train_set = dataset_module.get_vanilla_train_set_vanilla_label(cfg)
 
         self.context_aware_prob = self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling_prob
 
@@ -82,16 +83,12 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
     def construct_baseset(self):
         baseset_type = self.cfg.TASK_SPECIFIC.GIFS.baseset_type
         baseset_folder = f"save_{self.cfg.name}"
-        saved_path = f"{baseset_folder}/examplar_list_{baseset_type}"
-        if os.path.exists(saved_path) and baseset_type != 'random':
-            print(f"load baseset from {baseset_folder}/examplar_list_{baseset_type}")
-            examplar_list = torch.load(saved_path)
-        elif baseset_type == 'random':
+        if baseset_type == 'random':
             print(f"construct {baseset_type} baseset for {self.cfg.name}")
-            examplar_list = np.arange(0, len(self.train_set_vanilla_label))
-        elif baseset_type in ['far', 'close', 'far_close']:
+            examplar_list = np.arange(0, len(self.train_set))
+        elif baseset_type in ['far', 'close', 'far_close', 'uniform_interval']:
             print(f"construct {baseset_type} baseset for {self.cfg.name}")
-            base_id_list = self.train_set_vanilla_label.dataset.get_label_range()
+            base_id_list = self.train_set.dataset.get_label_range()
             if not os.path.exists(f"{baseset_folder}/similarity_dic"):
                 self.prv_backbone_net = deepcopy(self.backbone_net)
                 self.prv_post_processor = deepcopy(self.post_processor)
@@ -113,8 +110,8 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                     similarity_dic[c] = []
  
                 # Maintain a m-size heap to store the top m images of each class
-                for i in tqdm(range(len(self.train_set_vanilla_label))):
-                    img, mask = self.train_set_vanilla_label[i]
+                for i in tqdm(range(len(self.train_set))):
+                    img, mask = self.train_set[i]
                     class_list = torch.unique(mask).tolist()
                     img_tensor = torch.stack([img]).cuda()
                     mask_tensor = torch.stack([mask]).cuda()
@@ -127,6 +124,8 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                         img_weight = img_weight.cpu().unsqueeze(0)
                         similarity = F.cosine_similarity(img_weight, mean_weight_dic[c])
                         similarity_dic[c].append((similarity, i))
+                for c in base_id_list:
+                    similarity_dic[c] = sorted(similarity_dic[c], key=lambda x:x[0])
                 if not os.path.exists(baseset_folder):   
                     os.makedirs(baseset_folder)  
                 torch.save(similarity_dic, f"{baseset_folder}/similarity_dic")
@@ -134,34 +133,46 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                 print("load similarity_dic")
                 similarity_dic = torch.load(f"{baseset_folder}/similarity_dic")
             m = (memory_bank_size // len(base_id_list)) * 2
-            if 'far' in baseset_type:
+            if baseset_type == 'far':
                 m_far = m
-            if 'close' in baseset_type:
+                m_close = 0
+            elif baseset_type == 'close':
+                m_far = 0
                 m_close = m
-            if baseset_type == 'far_close':
-                m_close //= 2
-                m_far //= 2
+            elif baseset_type == 'far_close':
+                m_close = m // 2
+                m_far = m // 2
+            elif baseset_type == 'uniform_interval':
+                m_interval = m
+            else:
+                raise NotImplementedError
             # Combine all the top images of each class by set union
             examplar_set = set()
             for c in base_id_list:
-                similarity_list = sorted(similarity_dic[c], key=lambda x:x[0])
-                if 'close' in baseset_type:
-                    count = min(m_close, len(self.train_set_vanilla_label.dataset.get_class_map(c)))
-                    close_list = similarity_list[:count]
-                    class_examplar_list = [i for similarity, i in close_list]
+                if baseset_type == 'close' or baseset_type == 'far_close':
+                    assert m_close <= len(similarity_dic[c])
+                    close_list = similarity_dic[c][-m_close:]
+                    class_examplar_list = [i for _, i in close_list]
                     examplar_set = examplar_set.union(class_examplar_list)
-
-                if 'far' in baseset_type:
-                    count = min(m_far, len(self.train_set_vanilla_label.dataset.get_class_map(c)))
-                    far_list = similarity_list[-count:]
-                    class_examplar_list = [i for similarity, i in far_list]
+                if baseset_type == 'far' or baseset_type == 'far_close':
+                    assert m_far <= len(similarity_dic[c])
+                    far_list = similarity_dic[c][:m_far]
+                    class_examplar_list = [i for _, i in far_list]
                     examplar_set = examplar_set.union(class_examplar_list)
-
+                if baseset_type == 'uniform_interval':
+                    assert m_interval <= len(similarity_dic[c]), f"needs {m_interval} from {len(similarity_dic[c])}"
+                    interval_size = len(similarity_dic[c]) // m_interval
+                    class_examplar_list = []
+                    for i in range(m_interval):
+                        int_start = interval_size * i
+                        assert int_start < len(similarity_dic[c])
+                        int_end = min(interval_size * (i + 1), len(similarity_dic[c]))
+                        sample_tuple = similarity_dic[c][np.random.randint(low=int_start, high=int_end)]
+                        class_examplar_list.append(sample_tuple[1]) # first element is similarity
+                    examplar_set = examplar_set.union(class_examplar_list)
             examplar_list = sorted(list(examplar_set))
-            
         else:
             raise AssertionError('invalid baseset_type', baseset_type)
-            
         print(f"total number of examplar_list {len(examplar_list)}")
         return np.random.choice(examplar_list, replace=False, size=(memory_bank_size,))
     
@@ -176,9 +187,12 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
     def synthesizer_sample(self, novel_obj_id):
         # Sample an image from base memory bank
         if torch.rand(1) < self.context_aware_prob:
-            # Context-aware sampling from a contextually-similar subset of the memory replay buffer
-            memory_buffer_idx = np.random.choice(self.context_similar_map[novel_obj_id])
-            base_img_idx = self.base_img_candidates[memory_buffer_idx]
+            if False:
+                base_img_idx = np.random.choice(self.base_img_candidates, p=self.context_similar_map[novel_obj_id])
+            else:
+                # Context-aware sampling from a contextually-similar subset of the memory replay buffer
+                memory_buffer_idx = np.random.choice(self.context_similar_map[novel_obj_id])
+                base_img_idx = self.base_img_candidates[memory_buffer_idx]
         else:
             # Uniformly sample from the memory buffer
             base_img_idx = np.random.choice(self.base_img_candidates)
@@ -207,7 +221,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         elif self.cfg.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat == 'always':
             other_prob = 1
             selected_novel_prob = 1
-            num_existing_objects = 0
+            num_existing_objects = 1
             num_novel_objects = 1
         elif self.cfg.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat == 'always_no':
             other_prob = 0
@@ -321,22 +335,51 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
 
         if self.context_aware_prob > 0:
             self.context_similar_map = {}
+            if False:
+                beta = 10 # temperature parameter to scale cos similarity
+                for novel_obj_id in novel_class_idx:
+                    assert novel_obj_id in support_set
+                    class_scene_embedding_list = []
+                    for idx in support_set[novel_obj_id]:
+                        novel_img_chw, mask_hw = self.continual_vanilla_train_set[idx]
+                        
+                        # Compute cosine embedding
+                        scene_embedding = self.get_scene_embedding(novel_img_chw.cuda())
+                        class_scene_embedding_list.append(scene_embedding)
+                    avg_class_scene_embedding = torch.stack(class_scene_embedding_list)
+                    avg_class_scene_embedding = torch.mean(avg_class_scene_embedding, dim=0)
+                    avg_class_scene_embedding = avg_class_scene_embedding.view((1,) + avg_class_scene_embedding.shape)
+                    similarity_score = F.cosine_similarity(avg_class_scene_embedding, self.base_pool_cos_embeddings)
+                    context_aware_sampling_prob = F.softmax(beta * similarity_score, dim=0)
+                    assert novel_obj_id not in self.context_similar_map
+                    context_aware_sampling_prob = context_aware_sampling_prob.cpu().numpy().astype(np.float64)
+                    # A known issue with np.random.choice https://numpy.org/doc/stable/reference/generated/numpy.isclose.html
+                    assert np.isclose(np.sum(context_aware_sampling_prob), 1)
+                    context_aware_sampling_prob = context_aware_sampling_prob / context_aware_sampling_prob.sum()
+                    self.context_similar_map[novel_obj_id] = context_aware_sampling_prob
+            else:
+                for novel_obj_id in novel_class_idx:
+                    assert novel_obj_id in support_set
+                    for idx in support_set[novel_obj_id]:
+                        novel_img_chw, mask_hw = self.continual_vanilla_train_set[idx]
+                        
+                        # Compute cosine embedding
+                        if self.context_aware_prob > 0:
+                            scene_embedding = self.get_scene_embedding(novel_img_chw.cuda())
+                            scene_embedding = scene_embedding.view((1,) + scene_embedding.shape)
+                            similarity_score = F.cosine_similarity(scene_embedding, self.base_pool_cos_embeddings)
+                            base_candidates = torch.argsort(similarity_score)[-int(0.1 * self.base_pool_cos_embeddings.shape[0]):] # Indices array
+                            if novel_obj_id not in self.context_similar_map:
+                                self.context_similar_map[novel_obj_id] = list(base_candidates.cpu().numpy())
+                            else:
+                                self.context_similar_map[novel_obj_id] += list(base_candidates.cpu().numpy())
+                for c in self.context_similar_map:
+                    self.context_similar_map[c] = list(set(self.context_similar_map[c]))
 
         for novel_obj_id in novel_class_idx:
             assert novel_obj_id in support_set
             for idx in support_set[novel_obj_id]:
                 novel_img_chw, mask_hw = self.continual_vanilla_train_set[idx]
-                
-                # Compute cosine embedding
-                if self.context_aware_prob > 0:
-                    scene_embedding = self.get_scene_embedding(novel_img_chw.cuda())
-                    scene_embedding = scene_embedding.view((1,) + scene_embedding.shape)
-                    similarity_score = F.cosine_similarity(scene_embedding, self.base_pool_cos_embeddings)
-                    base_candidates = torch.argsort(similarity_score)[-int(0.1 * self.base_pool_cos_embeddings.shape[0]):] # Indices array
-                    if novel_obj_id not in self.context_similar_map:
-                        self.context_similar_map[novel_obj_id] = list(base_candidates.cpu().numpy())
-                    else:
-                        self.context_similar_map[novel_obj_id] += list(base_candidates.cpu().numpy())
 
                 novel_mask_hw = (mask_hw == novel_obj_id)
 
@@ -369,10 +412,6 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                 img_roi = novel_img_chw[:,y_min:y_max,x_min:x_max]
                 assert mask_roi.shape[0] > 0 and mask_roi.shape[1] > 0
                 self.partial_data_pool[novel_obj_id].append((img_roi, mask_roi))
-
-        if self.context_aware_prob > 0:
-            for c in self.context_similar_map:
-                self.context_similar_map[c] = list(set(self.context_similar_map[c]))
 
         self.backbone_net.train()
         self.post_processor.train()

@@ -194,6 +194,11 @@ def get_train_set_vanilla_label(cfg):
     ds = COCO20iReader(COCO_PATH, folding, True, exclude_novel=True, vanilla_label=True)
     return base_set(ds, "train", cfg)
 
+def get_vanilla_train_set_vanilla_label(cfg):
+    folding = cfg.DATASET.COCO20i.folding
+    ds = COCO20iReader(COCO_PATH, folding, True, exclude_novel=True, vanilla_label=True)
+    return base_set(ds, "test", cfg)
+
 def get_val_set(cfg):
     folding = cfg.DATASET.COCO20i.folding
     ds = COCO20iReader(COCO_PATH, folding, False, exclude_novel=False)
