@@ -25,7 +25,7 @@ DATASET:
   TRANSFORM:
     TRAIN:
       transforms: ('normalize', )
-      joint_transforms: ('joint_random_resized_crop', 'joint_random_horizontal_flip')
+      joint_transforms: ('joint_random_scale_crop', 'joint_random_horizontal_flip')
       TRANSFORMS_DETAILS:
         NORMALIZE:
           mean: (0.4700, 0.4468, 0.4076)
@@ -33,12 +33,10 @@ DATASET:
         crop_size: (512, 512)
     TEST:
       transforms: ('normalize', )
-      joint_transforms: ('joint_naive_resize', )
       TRANSFORMS_DETAILS:
         NORMALIZE:
           mean: (0.4700, 0.4468, 0.4076)
           sd: (0.2439, 0.2390, 0.2420)
-        crop_size: (512, 512)
 
 TRAIN:
   max_epochs: 50
