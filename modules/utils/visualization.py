@@ -24,9 +24,16 @@ def norm_tensor_to_np(cfg, arr):
     return arr
 
 def save_to_disk(cfg, arr, path):
-    if isinstance(arr, torch.Tensor) and arr.shape[0] == 3:
+    if isinstance(arr, torch.Tensor) and len(arr.shape) == 3 and arr.shape[0] == 3:
         # TODO: check tensor type (float) to denormalize.
         arr = norm_tensor_to_np(cfg, arr)
+    elif isinstance(arr, torch.Tensor) and len(arr.shape) == 2:
+        arr = arr.cpu().detach().numpy()
+        if arr.dtype == np.dtype('int64'):
+            assert arr.max() < 256
+            arr = arr.astype(np.uint8)
+    else:
+        raise NotImplementedError
     im = Image.fromarray(arr)
     im.save(path)
 
@@ -42,6 +49,8 @@ def generalized_imshow(cfg, arr):
     if isinstance(arr, torch.Tensor) and arr.shape[0] == 3:
         # TODO: check tensor type (float) to denormalize.
         arr = norm_tensor_to_np(cfg, arr)
+    plt.margins(x=0)
+    plt.axis('off')
     plt.imshow(arr)
     plt.show()
 

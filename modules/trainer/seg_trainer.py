@@ -59,7 +59,7 @@ class seg_trainer(trainer_base):
     def test_one(self, device):
         return self.val_one(device)
     
-    def eval_on_loader(self, test_loader, num_classes, visfreq=99999999, masked_class=None):
+    def eval_on_loader(self, test_loader, num_classes, visfreq=9999999999, masked_class=None):
         self.backbone_net.eval()
         self.post_processor.eval()
         test_loss = 0
@@ -89,8 +89,10 @@ class seg_trainer(trainer_base):
                     if (idx + 1) % visfreq == 0:
                         gt_label = utils.visualize_segmentation(self.cfg, data[i], target_np, None)
                         predicted_label = utils.visualize_segmentation(self.cfg, data[i], pred_np, None)
-                        cv2.imwrite("{}_{}_pred.png".format(idx, i), predicted_label)
-                        cv2.imwrite("{}_{}_label.png".format(idx, i), gt_label)
+                        np.save('/tmp/{}_{}_pred.npy'.format(idx, i), pred_np)
+                        # np.save('/tmp/{}_{}_gt.npy'.format(idx, i), target_np)
+                        # cv2.imwrite("{}_{}_pred.png".format(idx, i), predicted_label)
+                        # cv2.imwrite("{}_{}_label.png".format(idx, i), gt_label)
                         # Visualize RGB image as well
                         ori_rgb_np = np.array(data[i].permute((1, 2, 0)).cpu())
                         if 'normalize' in self.cfg.DATASET.TRANSFORM.TEST.transforms:
@@ -102,7 +104,7 @@ class seg_trainer(trainer_base):
                         ori_rgb_np = (ori_rgb_np * 255).astype(np.uint8)
                         # Convert to OpenCV BGR
                         ori_rgb_np = cv2.cvtColor(ori_rgb_np, cv2.COLOR_RGB2BGR)
-                        cv2.imwrite("{}_{}_ori.jpg".format(idx, i), ori_rgb_np)
+                        cv2.imwrite("/tmp/{}_{}_ori.jpg".format(idx, i), ori_rgb_np)
 
         test_loss /= len(test_loader.dataset)
 
