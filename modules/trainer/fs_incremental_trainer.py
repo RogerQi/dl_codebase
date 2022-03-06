@@ -10,14 +10,11 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-import torchvision
+import torchvision as tv
 import torchvision.transforms.functional as tr_F
 from tqdm import tqdm, trange
-from torchvision import transforms
-import heapq
 from backbone.deeplabv3_renorm import BatchRenorm2d
 
-import classifier
 import utils
 
 from .sequential_GIFS_seg_trainer import sequential_GIFS_seg_trainer
@@ -37,29 +34,6 @@ class kd_criterion(nn.Module):
         element_wise_loss = x_ref * torch.log(x_pred)
         return -torch.mean(element_wise_loss)
 
-class KnowledgeDistillationLoss(nn.Module):
-    def __init__(self, reduction='mean', alpha=1.):
-        super().__init__()
-        self.reduction = reduction
-        self.alpha = alpha
-
-    def forward(self, inputs, targets):
-        inputs = inputs.narrow(1, 0, targets.shape[1])
-
-        outputs = torch.log_softmax(inputs, dim=1)
-        labels = torch.softmax(targets / self.alpha, dim=1)
-
-        loss = -(outputs * labels).mean(dim=1) * (self.alpha ** 2)
-
-        if self.reduction == 'mean':
-            outputs = torch.mean(loss)
-        elif self.reduction == 'sum':
-            outputs = torch.sum(loss)
-        else:
-            outputs = loss
-
-        return outputs
-
 memory_bank_size = 500
 
 class fs_incremental_trainer(sequential_GIFS_seg_trainer):
@@ -72,10 +46,9 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
 
         self.train_set_vanilla_label = dataset_module.get_train_set_vanilla_label(cfg)
         self.vanilla_train_set = dataset_module.get_vanilla_train_set_vanilla_label(cfg)
+        self.train_set_unaug = dataset_module.get_unaug_train_set(cfg)
 
         self.context_aware_prob = self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling_prob
-
-        print("Context aware probability: {}".format(self.context_aware_prob))
 
         assert self.context_aware_prob >= 0
         assert self.context_aware_prob <= 1
@@ -110,8 +83,8 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                     similarity_dic[c] = []
  
                 # Maintain a m-size heap to store the top m images of each class
-                for i in tqdm(range(len(self.train_set))):
-                    img, mask = self.train_set[i]
+                for i in tqdm(range(len(self.train_set_unaug))):
+                    img, mask = self.train_set_unaug[i]
                     class_list = torch.unique(mask).tolist()
                     img_tensor = torch.stack([img]).cuda()
                     mask_tensor = torch.stack([mask]).cuda()
@@ -160,7 +133,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                     class_examplar_list = [i for _, i in far_list]
                     examplar_set = examplar_set.union(class_examplar_list)
                 if baseset_type == 'uniform_interval':
-                    assert m_interval <= len(similarity_dic[c]), f"needs {m_interval} from {len(similarity_dic[c])}"
+                    assert m_interval <= len(similarity_dic[c]), f"Need {m_interval} from {len(similarity_dic[c])}"
                     interval_size = len(similarity_dic[c]) // m_interval
                     class_examplar_list = []
                     for i in range(m_interval):
@@ -187,12 +160,9 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
     def synthesizer_sample(self, novel_obj_id):
         # Sample an image from base memory bank
         if torch.rand(1) < self.context_aware_prob:
-            if False:
-                base_img_idx = np.random.choice(self.base_img_candidates, p=self.context_similar_map[novel_obj_id])
-            else:
-                # Context-aware sampling from a contextually-similar subset of the memory replay buffer
-                memory_buffer_idx = np.random.choice(self.context_similar_map[novel_obj_id])
-                base_img_idx = self.base_img_candidates[memory_buffer_idx]
+            # Context-aware sampling from a contextually-similar subset of the memory replay buffer
+            memory_buffer_idx = np.random.choice(self.context_similar_map[novel_obj_id])
+            base_img_idx = self.base_img_candidates[memory_buffer_idx]
         else:
             # Uniformly sample from the memory buffer
             base_img_idx = np.random.choice(self.base_img_candidates)
@@ -219,20 +189,15 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
             num_existing_objects = 2
             num_novel_objects = 2
         elif self.cfg.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat == 'always':
-            other_prob = 1
-            selected_novel_prob = 1
-            num_existing_objects = 1
-            num_novel_objects = 1
-        elif self.cfg.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat == 'always_no':
             other_prob = 0
-            selected_novel_prob = 0
+            selected_novel_prob = 1
             num_existing_objects = 0
-            num_novel_objects = 0
+            num_novel_objects = 2
         elif self.cfg.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat == 'CAS':
             other_prob = 1. / total_classes
             selected_novel_prob = 1. / total_classes
-            num_existing_objects = 2
-            num_novel_objects = 2
+            num_existing_objects = 1
+            num_novel_objects = 1
         else:
             raise NotImplementedError("Unknown probabilistic synthesis strategy: {}".format(self.cfg.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat))
         assert other_prob >= 0 and other_prob <= 1
@@ -280,7 +245,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         # Compute feature vectors for data in the pool
         self.base_pool_cos_embeddings = []
         for base_data_idx in self.base_img_candidates:
-            img_chw, _ = self.train_set_vanilla_label[base_data_idx]
+            img_chw, _ = self.vanilla_train_set[base_data_idx]
             img_chw = img_chw.to(self.device)
             scene_embedding = self.get_scene_embedding(img_chw)
             assert len(scene_embedding.shape) == 1
@@ -288,13 +253,15 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         self.base_pool_cos_embeddings = torch.stack(self.base_pool_cos_embeddings)
     
     def copy_and_paste(self, novel_img_chw, novel_mask_hw, base_img_chw, base_mask_hw, mask_id):
+        base_img_chw = base_img_chw.clone()
+        base_mask_hw = base_mask_hw.clone()
         # Horizontal Flipping
         if torch.rand(1) < 0.5:
             novel_img_chw = tr_F.hflip(novel_img_chw)
             novel_mask_hw = tr_F.hflip(novel_mask_hw)
         
-        # Random resizing
-        scale = np.random.uniform(0.8, 1.2)
+        # Parameters for random resizing
+        scale = np.random.uniform(0.1, 2.0)
         src_h, src_w = novel_mask_hw.shape
         if src_h * scale > base_mask_hw.shape[0]:
             scale = base_mask_hw.shape[0] / src_h
@@ -307,7 +274,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         # apply
         novel_img_chw = tr_F.resize(novel_img_chw, (target_H, target_W))
         novel_mask_hw = novel_mask_hw.view((1,) + novel_mask_hw.shape)
-        novel_mask_hw = tr_F.resize(novel_mask_hw, (target_H, target_W), interpolation=torchvision.transforms.InterpolationMode.NEAREST)
+        novel_mask_hw = tr_F.resize(novel_mask_hw, (target_H, target_W), interpolation=tv.transforms.InterpolationMode.NEAREST)
         novel_mask_hw = novel_mask_hw.view(novel_mask_hw.shape[1:])
 
         # Random Translation
@@ -334,47 +301,23 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         print(f"Adapting to novel id {novel_class_idx}")
 
         if self.context_aware_prob > 0:
-            self.context_similar_map = {}
-            if False:
-                beta = 10 # temperature parameter to scale cos similarity
-                for novel_obj_id in novel_class_idx:
-                    assert novel_obj_id in support_set
-                    class_scene_embedding_list = []
-                    for idx in support_set[novel_obj_id]:
-                        novel_img_chw, mask_hw = self.continual_vanilla_train_set[idx]
-                        
-                        # Compute cosine embedding
+            for novel_obj_id in novel_class_idx:
+                assert novel_obj_id in support_set
+                for idx in support_set[novel_obj_id]:
+                    novel_img_chw, mask_hw = self.continual_vanilla_train_set[idx]
+                    
+                    # Compute cosine embedding
+                    if self.context_aware_prob > 0:
                         scene_embedding = self.get_scene_embedding(novel_img_chw.cuda())
-                        class_scene_embedding_list.append(scene_embedding)
-                    avg_class_scene_embedding = torch.stack(class_scene_embedding_list)
-                    avg_class_scene_embedding = torch.mean(avg_class_scene_embedding, dim=0)
-                    avg_class_scene_embedding = avg_class_scene_embedding.view((1,) + avg_class_scene_embedding.shape)
-                    similarity_score = F.cosine_similarity(avg_class_scene_embedding, self.base_pool_cos_embeddings)
-                    context_aware_sampling_prob = F.softmax(beta * similarity_score, dim=0)
-                    assert novel_obj_id not in self.context_similar_map
-                    context_aware_sampling_prob = context_aware_sampling_prob.cpu().numpy().astype(np.float64)
-                    # A known issue with np.random.choice https://numpy.org/doc/stable/reference/generated/numpy.isclose.html
-                    assert np.isclose(np.sum(context_aware_sampling_prob), 1)
-                    context_aware_sampling_prob = context_aware_sampling_prob / context_aware_sampling_prob.sum()
-                    self.context_similar_map[novel_obj_id] = context_aware_sampling_prob
-            else:
-                for novel_obj_id in novel_class_idx:
-                    assert novel_obj_id in support_set
-                    for idx in support_set[novel_obj_id]:
-                        novel_img_chw, mask_hw = self.continual_vanilla_train_set[idx]
-                        
-                        # Compute cosine embedding
-                        if self.context_aware_prob > 0:
-                            scene_embedding = self.get_scene_embedding(novel_img_chw.cuda())
-                            scene_embedding = scene_embedding.view((1,) + scene_embedding.shape)
-                            similarity_score = F.cosine_similarity(scene_embedding, self.base_pool_cos_embeddings)
-                            base_candidates = torch.argsort(similarity_score)[-int(0.1 * self.base_pool_cos_embeddings.shape[0]):] # Indices array
-                            if novel_obj_id not in self.context_similar_map:
-                                self.context_similar_map[novel_obj_id] = list(base_candidates.cpu().numpy())
-                            else:
-                                self.context_similar_map[novel_obj_id] += list(base_candidates.cpu().numpy())
-                for c in self.context_similar_map:
-                    self.context_similar_map[c] = list(set(self.context_similar_map[c]))
+                        scene_embedding = scene_embedding.view((1,) + scene_embedding.shape)
+                        similarity_score = F.cosine_similarity(scene_embedding, self.base_pool_cos_embeddings)
+                        base_candidates = torch.argsort(similarity_score)[-int(0.1 * self.base_pool_cos_embeddings.shape[0]):] # Indices array
+                        if novel_obj_id not in self.context_similar_map:
+                            self.context_similar_map[novel_obj_id] = list(base_candidates.cpu().numpy())
+                        else:
+                            self.context_similar_map[novel_obj_id] += list(base_candidates.cpu().numpy())
+            for c in self.context_similar_map:
+                self.context_similar_map[c] = list(set(self.context_similar_map[c]))
 
         for novel_obj_id in novel_class_idx:
             assert novel_obj_id in support_set
@@ -442,7 +385,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, polynomial_schedule)
 
         l2_criterion = nn.MSELoss()
-        my_kd_criterion = KnowledgeDistillationLoss()
+        my_kd_criterion = kd_criterion()
 
         # Save vanilla self.post_processor (after MAP) for prototype distillation
         post_processor_distillation_ref = deepcopy(self.post_processor)
@@ -482,7 +425,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                             copy_cls = random.choice(list(novel_class_idx))
                             copy_idx = random.choice(support_set[copy_cls])
                             copy_img_chw, copy_mask_hw = self.continual_vanilla_train_set[copy_idx]
-                            self.copy_and_paste(copy_img_chw, copy_mask_hw == copy_cls, img_chw, mask_hw, copy_cls)
+                            img_chw, mask_hw = self.copy_and_paste(copy_img_chw, copy_mask_hw == copy_cls, img_chw, mask_hw, copy_cls)
                         image_list.append(img_chw)
                         mask_list.append(mask_hw)
                 data_bchw = torch.stack(image_list).cuda().detach()
