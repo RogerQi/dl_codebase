@@ -8,13 +8,13 @@ import utils
 
 from .trainer_base import trainer_base
 
-scaler = torch.cuda.amp.GradScaler()
-
 class seg_trainer(trainer_base):
     def __init__(self, cfg, backbone_net, post_processor, criterion, dataset_module, device):
         super(seg_trainer, self).__init__(cfg, backbone_net, post_processor, criterion, dataset_module, device)
 
     def train_one(self, device, optimizer, epoch):
+        assert self.device == torch.device('cuda'), "Training support only GPU now"
+        scaler = torch.cuda.amp.GradScaler()
         self.backbone_net.train()
         self.post_processor.train()
         start_cp = time.time()

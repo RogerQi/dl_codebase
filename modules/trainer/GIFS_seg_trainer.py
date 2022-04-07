@@ -138,8 +138,8 @@ class GIFS_seg_trainer(seg_trainer):
                 for idx in support_set[c]:
                     img_chw, mask_hw = self.continual_vanilla_train_set[idx]
                     # novel class. Use MAP to initialize weight
-                    supp_img_bchw_tensor = img_chw.view((1,) + img_chw.shape).cuda()
-                    supp_mask_bhw_tensor = mask_hw.view((1,) + mask_hw.shape).cuda()
+                    supp_img_bchw_tensor = img_chw.view((1,) + img_chw.shape).to(self.device)
+                    supp_mask_bhw_tensor = mask_hw.view((1,) + mask_hw.shape).to(self.device)
                     assert c in supp_mask_bhw_tensor
                     with torch.no_grad():
                         support_feature = self.prv_backbone_net(supp_img_bchw_tensor)

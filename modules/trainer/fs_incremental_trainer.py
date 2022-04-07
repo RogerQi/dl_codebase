@@ -86,8 +86,8 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                 for i in tqdm(range(len(self.train_set_unaug))):
                     img, mask = self.train_set_unaug[i]
                     class_list = torch.unique(mask).tolist()
-                    img_tensor = torch.stack([img]).cuda()
-                    mask_tensor = torch.stack([mask]).cuda()
+                    img_tensor = torch.stack([img]).to(self.device)
+                    mask_tensor = torch.stack([mask]).to(self.device)
                     for c in class_list:
                         if c not in base_id_set:
                             continue
@@ -241,7 +241,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
     def scene_model_setup(self):
         # Load torchscript
         self.scene_model = torch.jit.load('/data/cvpr2022/vgg16_scene_net.pt')
-        self.scene_model = self.scene_model.cuda()
+        self.scene_model = self.scene_model.to(self.device)
         # Compute feature vectors for data in the pool
         self.base_pool_cos_embeddings = []
         for base_data_idx in self.base_img_candidates:
@@ -308,7 +308,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                     
                     # Compute cosine embedding
                     if self.context_aware_prob > 0:
-                        scene_embedding = self.get_scene_embedding(novel_img_chw.cuda())
+                        scene_embedding = self.get_scene_embedding(novel_img_chw.to(self.device))
                         scene_embedding = scene_embedding.view((1,) + scene_embedding.shape)
                         similarity_score = F.cosine_similarity(scene_embedding, self.base_pool_cos_embeddings)
                         base_candidates = torch.argsort(similarity_score)[-int(0.1 * self.base_pool_cos_embeddings.shape[0]):] # Indices array
@@ -409,7 +409,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                         if False:
                             # Mask non-novel portion using pseudo labels
                             with torch.no_grad():
-                                data_bchw = img_chw.cuda()
+                                data_bchw = img_chw.to(self.device)
                                 data_bchw = data_bchw.view((1,) + data_bchw.shape)
                                 feature = self.prv_backbone_net(data_bchw)
                                 ori_spatial_res = data_bchw.shape[-2:]
@@ -428,8 +428,8 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                             img_chw, mask_hw = self.copy_and_paste(copy_img_chw, copy_mask_hw == copy_cls, img_chw, mask_hw, copy_cls)
                         image_list.append(img_chw)
                         mask_list.append(mask_hw)
-                data_bchw = torch.stack(image_list).cuda().detach()
-                target_bhw = torch.stack(mask_list).cuda().detach()
+                data_bchw = torch.stack(image_list).to(self.device).detach()
+                target_bhw = torch.stack(mask_list).to(self.device).detach()
                 feature = self.backbone_net(data_bchw)
                 ori_spatial_res = data_bchw.shape[-2:]
                 output = self.post_processor(feature, ori_spatial_res, scale_factor=10)
