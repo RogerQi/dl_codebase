@@ -1,8 +1,5 @@
-import random
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 from torchvision import transforms
 from .transforms.dispatcher import dispatcher
 
@@ -36,7 +33,7 @@ class base_set(torch.utils.data.Dataset):
             assert isinstance(key[0], int)
             assert isinstance(key[1], dict)
             params = key[1]
-        elif isinstance(key, int):
+        elif isinstance(key, int) or isinstance(key, np.integer):
             index = key
             params = {}
         else:
