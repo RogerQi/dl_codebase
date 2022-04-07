@@ -4,9 +4,6 @@ input_dim: (1, 28, 28)
 num_classes: 10
 save_model: False
 
-SYSTEM:
-  use_cpu: False
-
 BACKBONE:
   network: 'lenet'
   pooling: True

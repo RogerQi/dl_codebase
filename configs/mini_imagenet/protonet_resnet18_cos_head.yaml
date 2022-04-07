@@ -8,7 +8,6 @@ META_TEST:
   shot: 5
 
 SYSTEM:
-  use_cpu: False
   num_workers: 12
 
 BACKBONE:

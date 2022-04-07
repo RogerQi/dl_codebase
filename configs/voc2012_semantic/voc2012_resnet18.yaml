@@ -4,9 +4,6 @@ input_dim: (3, 224, 224)
 num_classes: 21 # (20 annotated class + 1 background)
 save_model: False
 
-SYSTEM:
-  use_cpu: False
-
 BACKBONE:
   network: 'resnet18'
   pooling: False
