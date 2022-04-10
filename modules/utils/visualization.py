@@ -63,7 +63,7 @@ def visualize_segmentation(cfg, img, label_np, class_names_list):
         assert label_np.max() < len(class_names_list)
     ori_img = norm_tensor_to_np(cfg, img)
     rgb_img_w_lbl = imgviz.label2rgb(
-        label=label_np, img=imgviz.asgray(ori_img), label_names=class_names_list, loc="rb"
+        label=label_np, image=imgviz.asgray(ori_img), label_names=class_names_list, loc="rb"
     )
 
     return rgb_img_w_lbl

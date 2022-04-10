@@ -323,36 +323,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
             assert novel_obj_id in support_set
             for idx in support_set[novel_obj_id]:
                 novel_img_chw, mask_hw = self.continual_vanilla_train_set[idx]
-
-                novel_mask_hw = (mask_hw == novel_obj_id)
-
-                novel_mask_hw_np = novel_mask_hw.numpy().astype(np.uint8)
-
-                # RETR_EXTERNAL to keep online the outer contour
-                contours, _ = cv2.findContours(novel_mask_hw_np, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-                # Crop annotated objects off the image
-                # Compute a minimum rectangle containing the object
-                if len(contours) == 0: continue
-                cnt = contours[0]
-                x_min = tuple(cnt[cnt[:,:,0].argmin()][0])[0]
-                x_max = tuple(cnt[cnt[:,:,0].argmax()][0])[0]
-                y_min = tuple(cnt[cnt[:,:,1].argmin()][0])[1]
-                y_max = tuple(cnt[cnt[:,:,1].argmax()][0])[1]
-                for cnt in contours:
-                    x_min = min(x_min, tuple(cnt[cnt[:,:,0].argmin()][0])[0])
-                    x_max = max(x_max, tuple(cnt[cnt[:,:,0].argmax()][0])[0])
-                    y_min = min(y_min, tuple(cnt[cnt[:,:,1].argmin()][0])[1])
-                    y_max = max(y_max, tuple(cnt[cnt[:,:,1].argmax()][0])[1])
-                # Index of max bounding rect are inclusive so need 1 offset
-                x_max += 1
-                y_max += 1
-                # Minimum bounding rectangle computed; now register it to the data pool
-                if novel_obj_id not in self.partial_data_pool:
-                    self.partial_data_pool[novel_obj_id] = []
-                # mask_roi is a boolean array
-                mask_roi = novel_mask_hw[y_min:y_max,x_min:x_max]
-                img_roi = novel_img_chw[:,y_min:y_max,x_min:x_max]
+                img_roi, mask_roi = utils.crop_partial_img(novel_img_chw, mask_hw, cls_id=novel_obj_id)
                 assert mask_roi.shape[0] > 0 and mask_roi.shape[1] > 0
                 self.partial_data_pool[novel_obj_id].append((img_roi, mask_roi))
 
