@@ -166,6 +166,13 @@ class GIFS_seg_trainer(seg_trainer):
         raise NotImplementedError
     
     def novel_adapt(self, base_class_idx, novel_class_idx, support_set):
+        """Novel adapt for quantitative evaluation on dataset
+
+        Args:
+            base_class_idx (list of ints): ints of existing base classes
+            novel_class_idx (list of ints): indices of novel class
+            support_set (dict): dictionary with novel_class_idx as keys and dataset idx as values
+        """
         max_cls = max(max(base_class_idx), max(novel_class_idx)) + 1
         self.post_processor = classifier.dispatcher(self.cfg, self.feature_shape, num_classes=max_cls)
         self.post_processor = self.post_processor.to(self.device)
