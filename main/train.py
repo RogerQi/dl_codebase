@@ -36,10 +36,7 @@ def main():
     update_config_from_yaml(cfg, args)
 
     print(cfg)
-
-    use_cuda = not cfg.SYSTEM.use_cpu
-    device_str = "cuda" if use_cuda else "cpu"
-    device = torch.device(device_str)
+    device = utils.guess_device()
 
     torch.manual_seed(cfg.seed)
 
@@ -65,7 +62,7 @@ def main():
     if cfg.BACKBONE.use_pretrained:
         weight_path = cfg.BACKBONE.pretrained_path
         print("Initializing backbone with pretrained weights from: {}".format(weight_path))
-        pretrained_weight_dict = torch.load(weight_path, map_location=device_str)
+        pretrained_weight_dict = torch.load(weight_path, map_location=device)
         if cfg.BACKBONE.network == 'panet_vgg16':
             keys = list(pretrained_weight_dict.keys())
             new_dict = backbone_net.state_dict()

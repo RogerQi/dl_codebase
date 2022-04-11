@@ -86,8 +86,8 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                 for i in tqdm(range(len(self.train_set_unaug))):
                     img, mask = self.train_set_unaug[i]
                     class_list = torch.unique(mask).tolist()
-                    img_tensor = torch.stack([img]).cuda()
-                    mask_tensor = torch.stack([mask]).cuda()
+                    img_tensor = torch.stack([img]).to(self.device)
+                    mask_tensor = torch.stack([mask]).to(self.device)
                     for c in class_list:
                         if c not in base_id_set:
                             continue
@@ -241,7 +241,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
     def scene_model_setup(self):
         # Load torchscript
         self.scene_model = torch.jit.load('/data/cvpr2022/vgg16_scene_net.pt')
-        self.scene_model = self.scene_model.cuda()
+        self.scene_model = self.scene_model.to(self.device)
         # Compute feature vectors for data in the pool
         self.base_pool_cos_embeddings = []
         for base_data_idx in self.base_img_candidates:
@@ -308,7 +308,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                     
                     # Compute cosine embedding
                     if self.context_aware_prob > 0:
-                        scene_embedding = self.get_scene_embedding(novel_img_chw.cuda())
+                        scene_embedding = self.get_scene_embedding(novel_img_chw.to(self.device))
                         scene_embedding = scene_embedding.view((1,) + scene_embedding.shape)
                         similarity_score = F.cosine_similarity(scene_embedding, self.base_pool_cos_embeddings)
                         base_candidates = torch.argsort(similarity_score)[-int(0.1 * self.base_pool_cos_embeddings.shape[0]):] # Indices array
@@ -323,36 +323,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
             assert novel_obj_id in support_set
             for idx in support_set[novel_obj_id]:
                 novel_img_chw, mask_hw = self.continual_vanilla_train_set[idx]
-
-                novel_mask_hw = (mask_hw == novel_obj_id)
-
-                novel_mask_hw_np = novel_mask_hw.numpy().astype(np.uint8)
-
-                # RETR_EXTERNAL to keep online the outer contour
-                contours, _ = cv2.findContours(novel_mask_hw_np, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-                # Crop annotated objects off the image
-                # Compute a minimum rectangle containing the object
-                if len(contours) == 0: continue
-                cnt = contours[0]
-                x_min = tuple(cnt[cnt[:,:,0].argmin()][0])[0]
-                x_max = tuple(cnt[cnt[:,:,0].argmax()][0])[0]
-                y_min = tuple(cnt[cnt[:,:,1].argmin()][0])[1]
-                y_max = tuple(cnt[cnt[:,:,1].argmax()][0])[1]
-                for cnt in contours:
-                    x_min = min(x_min, tuple(cnt[cnt[:,:,0].argmin()][0])[0])
-                    x_max = max(x_max, tuple(cnt[cnt[:,:,0].argmax()][0])[0])
-                    y_min = min(y_min, tuple(cnt[cnt[:,:,1].argmin()][0])[1])
-                    y_max = max(y_max, tuple(cnt[cnt[:,:,1].argmax()][0])[1])
-                # Index of max bounding rect are inclusive so need 1 offset
-                x_max += 1
-                y_max += 1
-                # Minimum bounding rectangle computed; now register it to the data pool
-                if novel_obj_id not in self.partial_data_pool:
-                    self.partial_data_pool[novel_obj_id] = []
-                # mask_roi is a boolean array
-                mask_roi = novel_mask_hw[y_min:y_max,x_min:x_max]
-                img_roi = novel_img_chw[:,y_min:y_max,x_min:x_max]
+                img_roi, mask_roi = utils.crop_partial_img(novel_img_chw, mask_hw, cls_id=novel_obj_id)
                 assert mask_roi.shape[0] > 0 and mask_roi.shape[1] > 0
                 self.partial_data_pool[novel_obj_id].append((img_roi, mask_roi))
 
@@ -409,7 +380,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                         if False:
                             # Mask non-novel portion using pseudo labels
                             with torch.no_grad():
-                                data_bchw = img_chw.cuda()
+                                data_bchw = img_chw.to(self.device)
                                 data_bchw = data_bchw.view((1,) + data_bchw.shape)
                                 feature = self.prv_backbone_net(data_bchw)
                                 ori_spatial_res = data_bchw.shape[-2:]
@@ -428,8 +399,8 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                             img_chw, mask_hw = self.copy_and_paste(copy_img_chw, copy_mask_hw == copy_cls, img_chw, mask_hw, copy_cls)
                         image_list.append(img_chw)
                         mask_list.append(mask_hw)
-                data_bchw = torch.stack(image_list).cuda().detach()
-                target_bhw = torch.stack(mask_list).cuda().detach()
+                data_bchw = torch.stack(image_list).to(self.device).detach()
+                target_bhw = torch.stack(mask_list).to(self.device).detach()
                 feature = self.backbone_net(data_bchw)
                 ori_spatial_res = data_bchw.shape[-2:]
                 output = self.post_processor(feature, ori_spatial_res, scale_factor=10)

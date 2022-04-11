@@ -5,8 +5,7 @@ num_classes: 21 # (40 annotated class + 1 background)
 save_model: True
 
 SYSTEM:
-  use_cpu: False
-  num_workers: 8
+  num_workers: 16
 
 BACKBONE:
   network: 'refinenet_lw50'

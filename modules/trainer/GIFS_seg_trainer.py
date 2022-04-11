@@ -138,8 +138,8 @@ class GIFS_seg_trainer(seg_trainer):
                 for idx in support_set[c]:
                     img_chw, mask_hw = self.continual_vanilla_train_set[idx]
                     # novel class. Use MAP to initialize weight
-                    supp_img_bchw_tensor = img_chw.view((1,) + img_chw.shape).cuda()
-                    supp_mask_bhw_tensor = mask_hw.view((1,) + mask_hw.shape).cuda()
+                    supp_img_bchw_tensor = img_chw.view((1,) + img_chw.shape).to(self.device)
+                    supp_mask_bhw_tensor = mask_hw.view((1,) + mask_hw.shape).to(self.device)
                     assert c in supp_mask_bhw_tensor
                     with torch.no_grad():
                         support_feature = self.prv_backbone_net(supp_img_bchw_tensor)
@@ -166,6 +166,13 @@ class GIFS_seg_trainer(seg_trainer):
         raise NotImplementedError
     
     def novel_adapt(self, base_class_idx, novel_class_idx, support_set):
+        """Novel adapt for quantitative evaluation on dataset
+
+        Args:
+            base_class_idx (list of ints): ints of existing base classes
+            novel_class_idx (list of ints): indices of novel class
+            support_set (dict): dictionary with novel_class_idx as keys and dataset idx as values
+        """
         max_cls = max(max(base_class_idx), max(novel_class_idx)) + 1
         self.post_processor = classifier.dispatcher(self.cfg, self.feature_shape, num_classes=max_cls)
         self.post_processor = self.post_processor.to(self.device)

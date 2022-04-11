@@ -26,7 +26,6 @@ _C.save_model = False
 # DL System Setting
 #######################
 _C.SYSTEM = CN()
-_C.SYSTEM.use_cpu = False
 _C.SYSTEM.pin_memory = True
 _C.SYSTEM.num_gpus = 1		# Number of GPUs to use
 _C.SYSTEM.num_workers = 4	# Number of CPU workers for errands

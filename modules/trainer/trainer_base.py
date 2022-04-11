@@ -19,9 +19,11 @@ class trainer_base(object):
         print("Training set contains {} data points. Val set contains {} data points.".format(len(self.train_set), len(self.val_set)))
 
         # Prepare loaders
-        self.use_cuda = not cfg.SYSTEM.use_cpu
         # TODO: change to iteration-based loader rather than epoch-based.
-        self.loader_kwargs = {'num_workers': cfg.SYSTEM.num_workers, 'pin_memory': cfg.SYSTEM.pin_memory, 'drop_last': True} if self.use_cuda else {}
+        self.loader_kwargs = {
+            'num_workers': cfg.SYSTEM.num_workers,
+            'pin_memory': cfg.SYSTEM.pin_memory,
+            'drop_last': True}
 
         self.train_loader = torch.utils.data.DataLoader(self.train_set, batch_size=cfg.TRAIN.batch_size, shuffle=True, **self.loader_kwargs)
         self.val_loader = torch.utils.data.DataLoader(self.val_set, batch_size=cfg.TEST.batch_size, shuffle=False, **self.loader_kwargs)

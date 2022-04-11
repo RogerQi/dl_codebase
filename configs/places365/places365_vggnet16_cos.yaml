@@ -4,9 +4,6 @@ input_dim: (3, 224, 224)
 num_classes: 365
 save_model: True
 
-SYSTEM:
-  use_cpu: False
-
 BACKBONE:
   network: 'vgg16'
   pooling: True

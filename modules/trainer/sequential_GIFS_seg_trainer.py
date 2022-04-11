@@ -1,23 +1,6 @@
 import numpy as np
-import matplotlib.pyplot as plt
 from copy import deepcopy
-import cv2
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import torch.nn.functional as F
-import torchvision
-import torchvision.transforms.functional as tr_F
-from tqdm import tqdm, trange
-
-from backbone.deeplabv3_renorm import BatchRenorm2d
-
-import classifier
-import utils
-
 from .GIFS_seg_trainer import GIFS_seg_trainer
-
-from IPython import embed
 
 def harmonic_mean(base_iou, novel_iou):
     return 2 / (1. / base_iou + 1. / novel_iou)

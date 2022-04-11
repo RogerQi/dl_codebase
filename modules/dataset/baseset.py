@@ -1,8 +1,5 @@
-import random
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 from torchvision import transforms
 from .transforms.dispatcher import dispatcher
 
@@ -30,7 +27,17 @@ class base_set(torch.utils.data.Dataset):
         self.data_transforms = self._get_mono_transforms(transforms_config_node, data_trans_ops)
         self.joint_transforms = self._get_joint_transforms(transforms_config_node, joint_trans_ops)
     
-    def __getitem__(self, index):
+    def __getitem__(self, key):
+        if isinstance(key, tuple):
+            assert len(key) == 2
+            assert isinstance(key[0], int)
+            assert isinstance(key[1], dict)
+            params = key[1]
+        elif isinstance(key, int) or isinstance(key, np.integer):
+            index = key
+            params = {}
+        else:
+            raise NotImplementedError
         data, label = self.dataset[index]
         data = self.data_transforms(data)
         data, label = self.joint_transforms(data, label)

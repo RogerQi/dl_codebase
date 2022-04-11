@@ -38,12 +38,7 @@ def main():
     # --------------------------
     args = parse_args()
     update_config_from_yaml(cfg, args)
-
-    use_cuda = not cfg.SYSTEM.use_cpu
-    device_str = "cuda" if use_cuda else "cpu"
-    device = torch.device(device_str)
-
-    kwargs = {'num_workers': cfg.SYSTEM.num_workers, 'pin_memory': cfg.SYSTEM.pin_memory} if use_cuda else {}
+    device = utils.guess_device()
 
     torch.manual_seed(cfg.seed)
 
