@@ -1,12 +1,12 @@
 name: 'scannet_25k_semantic_segmentation_refinenet'
 task: 'semantic_segmentation'
 input_dim: (3, 240, 320)
-num_classes: 41 # (40 annotated class + 1 background)
+num_classes: 21 # (40 annotated class + 1 background)
 save_model: True
 
 SYSTEM:
   use_cpu: False
-  num_workers: 16
+  num_workers: 8
 
 BACKBONE:
   network: 'refinenet_lw50'
@@ -15,7 +15,7 @@ BACKBONE:
   pretrained_path: "/data/pretrained_model/resnet50-19c8e357.pth"
 
 CLASSIFIER:
-  classifier: "plain_c1"
+  classifier: "seg_cos"
 
 LOSS:
   loss: 'semantic_nllloss'
@@ -25,7 +25,7 @@ DATASET:
   TRANSFORM:
     TRAIN:
       transforms: ('normalize', )
-      joint_transforms: ('joint_naive_resize', )
+      joint_transforms: ('joint_random_scale_crop', 'joint_random_horizontal_flip')
       TRANSFORMS_DETAILS:
         NORMALIZE:
           mean: (0.4700, 0.4468, 0.4076)
@@ -48,7 +48,6 @@ TRAIN:
     type: "SGD"
     momentum: 0.9
     weight_decay: 1e-4
-
 
 TEST:
   batch_size: 1
