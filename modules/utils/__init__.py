@@ -4,3 +4,4 @@ from .visualization import norm_tensor_to_np, generalized_imshow, visualize_segm
 from .non_parametric import masked_average_pooling
 from .dir_helper import get_dataset_root
 from .raw_dataset_wrapper import dataset_normalization_wrapper
+from .misc import download_file

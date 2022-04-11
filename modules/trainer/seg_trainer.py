@@ -2,6 +2,8 @@ import time
 import numpy as np
 import cv2
 import torch
+import torch.nn as nn
+import torchvision as tv
 from tqdm import tqdm
 
 import utils
@@ -58,6 +60,42 @@ class seg_trainer(trainer_base):
 
     def test_one(self, device):
         return self.val_one(device)
+    
+    def trace_model(self, target_path, normalization=True):
+        """Trace a trained model and serialize to a path
+        See https://pytorch.org/docs/stable/generated/torch.jit.trace.html
+
+        Args:
+            target_path (str): Target path to store serialized model
+            normalization (bool, optional): Whether normalization layer is used. When set to
+            True, UINT8 images ranging from 0-255 are expected. Defaults to True.
+        """
+        self.backbone_net.eval()
+        self.post_processor.eval()
+        dummy_tensor = torch.rand((1,) + self.cfg.input_dim).cuda() # BCHW
+        # Function factory
+        norm_mean = self.cfg.DATASET.TRANSFORM.TEST.TRANSFORMS_DETAILS.NORMALIZE.mean
+        norm_std = self.cfg.DATASET.TRANSFORM.TEST.TRANSFORMS_DETAILS.NORMALIZE.sd
+        class dummy_predictor(nn.Module):
+            def __init__(self, backbone_net, post_processor):
+                super(dummy_predictor, self).__init__()
+                self.backbone_net_ = backbone_net
+                self.post_processor_ = post_processor
+            
+            def forward(self, input_tensor):
+                if normalization:
+                    with torch.no_grad():
+                        input_tensor = input_tensor / 255.0
+                        input_tensor = tv.transforms.functional.normalize(input_tensor, norm_mean, norm_std)
+                with torch.no_grad():
+                    feature = self.backbone_net_(input_tensor.detach())
+                    ori_spatial_res = input_tensor.shape[-2:]
+                    output = self.post_processor_(feature, ori_spatial_res)
+                    return output
+        my_dummy_predictor = dummy_predictor(self.backbone_net, self.post_processor)
+        traced_script_module = torch.jit.trace(my_dummy_predictor, dummy_tensor)
+        traced_script_module.save(target_path)
+
     
     def eval_on_loader(self, test_loader, num_classes, visfreq=9999999999, masked_class=None):
         self.backbone_net.eval()

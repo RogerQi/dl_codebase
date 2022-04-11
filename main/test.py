@@ -20,6 +20,7 @@ def parse_args():
     parser.add_argument('--cfg', help = "specify particular yaml configuration to use", required = True,
         default = "configs/mnist_torch_official.yaml", type = str)
     parser.add_argument('--load', help="specify saved checkpoint to evaluate", required=True, type=str)
+    parser.add_argument('--jit_trace', help='Trace and serialize trained network. Overwrite other options', action='store_true')
     parser.add_argument('--webcam', help='real-time evaluate using default webcam', action='store_true')
     parser.add_argument('--visfreq', help="visualize results for every n examples in test set",
         required=False, default=99999999999, type=int)
@@ -73,7 +74,11 @@ def main():
     print("Initializing backbone with trained weights from: {}".format(args.load))
     my_trainer.load_model(args.load)
 
-    if args.webcam:
+    if args.jit_trace:
+        trained_weight_path = args.load
+        assert trained_weight_path.endswith('.pt')
+        my_trainer.trace_model(trained_weight_path.replace('.pt', '_traced.pt'))
+    elif args.webcam:
         my_trainer.live_run(device)
     else:
        val_metric = my_trainer.test_one(device)
