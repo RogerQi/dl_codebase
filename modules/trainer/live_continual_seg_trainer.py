@@ -17,12 +17,12 @@ from backbone.deeplabv3_renorm import BatchRenorm2d
 
 import utils
 
-from .fs_incremental_trainer import fs_incremental_trainer
+from .seg_trainer import seg_trainer
 from IPython import embed
 
 memory_bank_size = 500
 
-class live_continual_seg_trainer(fs_incremental_trainer):
+class live_continual_seg_trainer(seg_trainer):
     def __init__(self, cfg, backbone_net, post_processor, criterion, dataset_module, device):
         super(live_continual_seg_trainer, self).__init__(cfg, backbone_net, post_processor, criterion, dataset_module, device)
         

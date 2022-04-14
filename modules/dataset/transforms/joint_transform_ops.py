@@ -84,7 +84,6 @@ def joint_naive_resize(transforms_cfg):
 @joint_transforms_registry.register
 def joint_random_scale_crop(transforms_cfg):
     output_H, output_W = transforms_cfg.TRANSFORMS_DETAILS.crop_size
-    assert output_H == output_W
     size = (output_H, output_W)
     def crop(img, target):
         assert img.shape[-2:] == target.shape[-2:], "image and label map size mismatched"
