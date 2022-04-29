@@ -1,9 +1,9 @@
 name: 'GIFS_coco_things'
 task: 'live_continual_seg'
 input_dim: (3, 512, 512)
-num_classes: 81
-meta_training_num_classes: 81 # (15 annotated class in splitted training set + 1 background)
-meta_testing_num_classes: 81
+num_classes: 61
+meta_training_num_classes: 61 # (15 annotated class in splitted training set + 1 background)
+meta_testing_num_classes: 61
 save_model: True
 
 SYSTEM:
@@ -22,7 +22,9 @@ LOSS:
   loss: 'semantic_nllloss'
 
 DATASET:
-  dataset: 'coco2017'
+  dataset: 'coco_20i'
+  COCO20i:
+    folding: 1
   TRANSFORM:
     TRAIN:
       transforms: ('normalize', )
