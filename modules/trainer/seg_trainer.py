@@ -50,10 +50,11 @@ class seg_trainer(trainer_base):
 
     def val_one(self, device):
         if self.cfg.meta_training_num_classes != -1:
-            class_iou = self.eval_on_loader(self.val_loader, self.cfg.meta_training_num_classes)
+            class_iou, pixel_acc = self.eval_on_loader(self.val_loader, self.cfg.meta_training_num_classes)
         else:
-            class_iou = self.eval_on_loader(self.val_loader, self.cfg.num_classes)
+            class_iou, pixel_acc = self.eval_on_loader(self.val_loader, self.cfg.num_classes)
         print('Test set: Mean IoU {:.4f}'.format(np.mean(class_iou)))
+        print('Test set: Mean Acc {:.4f}'.format(pixel_acc))
         print("Class-wise IoU:")
         print(class_iou)
         return np.mean(class_iou)
@@ -88,9 +89,10 @@ class seg_trainer(trainer_base):
                         input_tensor = input_tensor / 255.0
                         input_tensor = tv.transforms.functional.normalize(input_tensor, norm_mean, norm_std)
                 with torch.no_grad():
-                    feature = self.backbone_net_(input_tensor.detach())
+                    feature = self.backbone_net_(input_tensor)
                     ori_spatial_res = input_tensor.shape[-2:]
                     output = self.post_processor_(feature, ori_spatial_res)
+                    output = torch.softmax(output, dim=1)[0] # CHW
                     return output
         my_dummy_predictor = dummy_predictor(self.backbone_net, self.post_processor)
         traced_script_module = torch.jit.trace(my_dummy_predictor, dummy_tensor)
@@ -147,4 +149,5 @@ class seg_trainer(trainer_base):
         test_loss /= len(test_loader.dataset)
 
         class_iou = class_intersection / (class_union + 1e-10)
-        return class_iou
+        mean_acc = np.mean(pixel_acc_list)
+        return class_iou, mean_acc

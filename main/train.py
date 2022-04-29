@@ -63,17 +63,10 @@ def main():
         weight_path = cfg.BACKBONE.pretrained_path
         print("Initializing backbone with pretrained weights from: {}".format(weight_path))
         pretrained_weight_dict = torch.load(weight_path, map_location=device)
-        if cfg.BACKBONE.network == 'panet_vgg16':
-            keys = list(pretrained_weight_dict.keys())
-            new_dict = backbone_net.state_dict()
-            new_keys = list(new_dict.keys())
-
-            for i in range(26):
-                new_dict[new_keys[i]] = pretrained_weight_dict[keys[i]]
-            
-            backbone_net.load_state_dict(new_dict, strict=True)
+        # Log missing/uncompatible keys
+        if 'backbone' in pretrained_weight_dict:
+            print(backbone_net.load_state_dict(pretrained_weight_dict['backbone'], strict=False))
         else:
-            # Log missing/uncompatible keys
             print(backbone_net.load_state_dict(pretrained_weight_dict, strict=False))
 
     criterion = loss.dispatcher(cfg)

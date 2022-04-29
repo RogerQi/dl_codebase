@@ -307,15 +307,14 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                     novel_img_chw, mask_hw = self.continual_vanilla_train_set[idx]
                     
                     # Compute cosine embedding
-                    if self.context_aware_prob > 0:
-                        scene_embedding = self.get_scene_embedding(novel_img_chw.to(self.device))
-                        scene_embedding = scene_embedding.view((1,) + scene_embedding.shape)
-                        similarity_score = F.cosine_similarity(scene_embedding, self.base_pool_cos_embeddings)
-                        base_candidates = torch.argsort(similarity_score)[-int(0.1 * self.base_pool_cos_embeddings.shape[0]):] # Indices array
-                        if novel_obj_id not in self.context_similar_map:
-                            self.context_similar_map[novel_obj_id] = list(base_candidates.cpu().numpy())
-                        else:
-                            self.context_similar_map[novel_obj_id] += list(base_candidates.cpu().numpy())
+                    scene_embedding = self.get_scene_embedding(novel_img_chw.to(self.device))
+                    scene_embedding = scene_embedding.view((1,) + scene_embedding.shape)
+                    similarity_score = F.cosine_similarity(scene_embedding, self.base_pool_cos_embeddings)
+                    base_candidates = torch.argsort(similarity_score)[-int(0.1 * self.base_pool_cos_embeddings.shape[0]):] # Indices array
+                    if novel_obj_id not in self.context_similar_map:
+                        self.context_similar_map[novel_obj_id] = list(base_candidates.cpu().numpy())
+                    else:
+                        self.context_similar_map[novel_obj_id] += list(base_candidates.cpu().numpy())
             for c in self.context_similar_map:
                 self.context_similar_map[c] = list(set(self.context_similar_map[c]))
 
@@ -325,6 +324,9 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                 novel_img_chw, mask_hw = self.continual_vanilla_train_set[idx]
                 img_roi, mask_roi = utils.crop_partial_img(novel_img_chw, mask_hw, cls_id=novel_obj_id)
                 assert mask_roi.shape[0] > 0 and mask_roi.shape[1] > 0
+                # Minimum bounding rectangle computed; now register it to the data pool
+                if novel_obj_id not in self.partial_data_pool:
+                    self.partial_data_pool[novel_obj_id] = []
                 self.partial_data_pool[novel_obj_id].append((img_roi, mask_roi))
 
         self.backbone_net.train()

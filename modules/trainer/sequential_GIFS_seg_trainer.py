@@ -65,7 +65,7 @@ class sequential_GIFS_seg_trainer(GIFS_seg_trainer):
             # https://github.com/fcdl94/FSS/blob/master/metrics/stream_metrics.py#L92
             unseen_classes = [i for i in support_set.keys() if i not in learned_novel_class_idx]
             print(f"Classes {unseen_classes} are masked from current evaluation.")
-            classwise_iou = self.eval_on_loader(self.continual_test_loader, total_num_classes, masked_class=unseen_classes)
+            classwise_iou, mean_pixel_acc = self.eval_on_loader(self.continual_test_loader, total_num_classes, masked_class=unseen_classes)
 
             classwise_iou = np.array(classwise_iou)
 
