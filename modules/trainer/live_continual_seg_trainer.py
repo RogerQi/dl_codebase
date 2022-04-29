@@ -154,7 +154,7 @@ class live_continual_seg_trainer(fs_incremental_trainer):
             assert len(self.base_img_candidates) == memory_bank_size
         assert novel_obj_name in self.psuedo_database
         syn_img_chw, syn_mask_hw = self.train_set[base_img_idx]
-        if True:
+        if novel_obj_name == 'suitcase':
             syn_mask_hw[syn_mask_hw == self.suitcase_idx] = target_id
         # Sample from partial data pool
         # Compute probability for synthesis
