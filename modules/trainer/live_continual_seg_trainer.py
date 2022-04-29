@@ -18,11 +18,13 @@ from backbone.deeplabv3_renorm import BatchRenorm2d
 import utils
 
 from .seg_trainer import seg_trainer
+from .fs_incremental_trainer import fs_incremental_trainer
 from IPython import embed
 
 memory_bank_size = 500
+infinite_memory_bank_size_flag = True
 
-class live_continual_seg_trainer(seg_trainer):
+class live_continual_seg_trainer(fs_incremental_trainer):
     def __init__(self, cfg, backbone_net, post_processor, criterion, dataset_module, device):
         super(live_continual_seg_trainer, self).__init__(cfg, backbone_net, post_processor, criterion, dataset_module, device)
         
@@ -32,10 +34,14 @@ class live_continual_seg_trainer(seg_trainer):
     def test_one(self, device):
         self.backbone_net.eval()
         self.post_processor.eval()
-        self.base_img_candidates = self.construct_baseset()
+        # TODO(roger): for dev purpose it uses the entire COCO dataset for replaying now
+        if infinite_memory_bank_size_flag:
+            self.base_img_candidates = list(range(len(self.train_set)))
+        else:
+            self.base_img_candidates = self.construct_baseset()
         normalizer = tv.transforms.Normalize(mean=self.cfg.DATASET.TRANSFORM.TRAIN.TRANSFORMS_DETAILS.NORMALIZE.mean,
                                     std=self.cfg.DATASET.TRANSFORM.TRAIN.TRANSFORMS_DETAILS.NORMALIZE.sd)
-        # load test video
+        # our_class_name = deepcopy(self.continual_test_set.dataset.CLASS_NAMES_LIST)
         novel_idx = [2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54, 58, 62, 66, 70, 74, 78]
         our_class_name = [self.continual_test_set.dataset.CLASS_NAMES_LIST[i] for i in range(81) if i not in novel_idx]
         suitcase_idx = our_class_name.index('suitcase')
@@ -144,7 +150,8 @@ class live_continual_seg_trainer(seg_trainer):
         target_id = self.img_name_id_map[novel_obj_name]
         base_img_idx = np.random.choice(self.base_img_candidates)
         assert base_img_idx in self.base_img_candidates
-        assert len(self.base_img_candidates) == memory_bank_size
+        if not infinite_memory_bank_size_flag:
+            assert len(self.base_img_candidates) == memory_bank_size
         assert novel_obj_name in self.psuedo_database
         syn_img_chw, syn_mask_hw = self.train_set[base_img_idx]
         if True:
