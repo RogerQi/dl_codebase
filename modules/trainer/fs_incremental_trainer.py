@@ -10,8 +10,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-import torchvision as tv
-import torchvision.transforms.functional as tr_F
 from tqdm import tqdm, trange
 from backbone.deeplabv3_renorm import BatchRenorm2d
 
@@ -210,14 +208,14 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                 selected_class = np.random.choice(candidate_classes)
                 selected_sample = random.choice(self.partial_data_pool[selected_class])
                 img_chw, mask_hw = selected_sample
-                syn_img_chw, syn_mask_hw = self.copy_and_paste(img_chw, mask_hw, syn_img_chw, syn_mask_hw, selected_class)
+                syn_img_chw, syn_mask_hw = utils.copy_and_paste(img_chw, mask_hw, syn_img_chw, syn_mask_hw, selected_class)
 
         # Synthesize selected novel class
         if torch.rand(1) < selected_novel_prob:
             for i in range(num_novel_objects):
                 selected_sample = random.choice(self.partial_data_pool[novel_obj_id])
                 img_chw, mask_hw = selected_sample
-                syn_img_chw, syn_mask_hw = self.copy_and_paste(img_chw, mask_hw, syn_img_chw, syn_mask_hw, novel_obj_id)
+                syn_img_chw, syn_mask_hw = utils.copy_and_paste(img_chw, mask_hw, syn_img_chw, syn_mask_hw, novel_obj_id)
 
         return (syn_img_chw, syn_mask_hw)
     
@@ -251,48 +249,6 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
             assert len(scene_embedding.shape) == 1
             self.base_pool_cos_embeddings.append(scene_embedding)
         self.base_pool_cos_embeddings = torch.stack(self.base_pool_cos_embeddings)
-    
-    def copy_and_paste(self, novel_img_chw, novel_mask_hw, base_img_chw, base_mask_hw, mask_id):
-        base_img_chw = base_img_chw.clone()
-        base_mask_hw = base_mask_hw.clone()
-        # Horizontal Flipping
-        if torch.rand(1) < 0.5:
-            novel_img_chw = tr_F.hflip(novel_img_chw)
-            novel_mask_hw = tr_F.hflip(novel_mask_hw)
-        
-        # Parameters for random resizing
-        scale = np.random.uniform(0.1, 2.0)
-        src_h, src_w = novel_mask_hw.shape
-        if src_h * scale > base_mask_hw.shape[0]:
-            scale = base_mask_hw.shape[0] / src_h
-        if src_w * scale > base_mask_hw.shape[1]:
-            scale = base_mask_hw.shape[1] / src_w
-        target_H = int(src_h * scale)
-        target_W = int(src_w * scale)
-        if target_H == 0: target_H = 1
-        if target_W == 0: target_W = 1
-        # apply
-        novel_img_chw = tr_F.resize(novel_img_chw, (target_H, target_W))
-        novel_mask_hw = novel_mask_hw.view((1,) + novel_mask_hw.shape)
-        novel_mask_hw = tr_F.resize(novel_mask_hw, (target_H, target_W), interpolation=tv.transforms.InterpolationMode.NEAREST)
-        novel_mask_hw = novel_mask_hw.view(novel_mask_hw.shape[1:])
-
-        # Random Translation
-        h, w = novel_mask_hw.shape
-        if base_mask_hw.shape[0] > h and base_mask_hw.shape[1] > w:
-            paste_x = torch.randint(low=0, high=base_mask_hw.shape[1] - w, size=(1,))
-            paste_y = torch.randint(low=0, high=base_mask_hw.shape[0] - h, size=(1,))
-        else:
-            paste_x = 0
-            paste_y = 0
-        
-        base_img_chw[:,paste_y:paste_y+h,paste_x:paste_x+w][:,novel_mask_hw] = novel_img_chw[:,novel_mask_hw]
-        base_mask_hw[paste_y:paste_y+h,paste_x:paste_x+w][novel_mask_hw] = mask_id
-
-        img_chw = base_img_chw
-        mask_hw = base_mask_hw
-
-        return (img_chw, mask_hw)
 
     def finetune_backbone(self, base_class_idx, novel_class_idx, support_set):
         assert self.prv_backbone_net is not None
@@ -398,7 +354,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                             copy_cls = random.choice(list(novel_class_idx))
                             copy_idx = random.choice(support_set[copy_cls])
                             copy_img_chw, copy_mask_hw = self.continual_vanilla_train_set[copy_idx]
-                            img_chw, mask_hw = self.copy_and_paste(copy_img_chw, copy_mask_hw == copy_cls, img_chw, mask_hw, copy_cls)
+                            img_chw, mask_hw = utils.copy_and_paste(copy_img_chw, copy_mask_hw == copy_cls, img_chw, mask_hw, copy_cls)
                         image_list.append(img_chw)
                         mask_list.append(mask_hw)
                 data_bchw = torch.stack(image_list).to(self.device).detach()
