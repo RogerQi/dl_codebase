@@ -24,7 +24,7 @@ from IPython import embed
 memory_bank_size = 500
 infinite_memory_bank_size_flag = True
 
-class live_continual_seg_trainer(fs_incremental_trainer):
+class live_continual_seg_trainer(seg_trainer):
     def __init__(self, cfg, backbone_net, post_processor, criterion, dataset_module, device):
         super(live_continual_seg_trainer, self).__init__(cfg, backbone_net, post_processor, criterion, dataset_module, device)
         
@@ -38,19 +38,13 @@ class live_continual_seg_trainer(fs_incremental_trainer):
         if infinite_memory_bank_size_flag:
             self.base_img_candidates = list(range(len(self.train_set)))
         else:
-            self.base_img_candidates = self.construct_baseset()
+            raise NotImplementedError
         normalizer = tv.transforms.Normalize(mean=self.cfg.DATASET.TRANSFORM.TRAIN.TRANSFORMS_DETAILS.NORMALIZE.mean,
                                     std=self.cfg.DATASET.TRANSFORM.TRAIN.TRANSFORMS_DETAILS.NORMALIZE.sd)
-        # our_class_name = deepcopy(self.continual_test_set.dataset.CLASS_NAMES_LIST)
-        novel_idx = [2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54, 58, 62, 66, 70, 74, 78]
-        our_class_name = [self.continual_test_set.dataset.CLASS_NAMES_LIST[i] for i in range(81) if i not in novel_idx]
-        suitcase_idx = our_class_name.index('suitcase')
-        self.suitcase_idx = suitcase_idx
-        self.post_processor.pixel_classifier.class_mat.weight.data[suitcase_idx] = torch.zeros_like(self.post_processor.pixel_classifier.class_mat.weight.data[suitcase_idx])
-        our_class_name.append('suitcase')
-        video_path = 'demo_airport.mp4'
+        self.class_names = deepcopy(self.train_set.dataset.CLASS_NAMES_LIST)
+        video_path = 'corkscrew_01_clutter_1.mp4'
         cap = cv2.VideoCapture(video_path)
-        out = cv2.VideoWriter('output.mp4',cv2.VideoWriter_fourcc(*'MP4V'), 30.0, (640,360))
+        out = cv2.VideoWriter('output.mp4',cv2.VideoWriter_fourcc(*'mp4v'), 30.0, (640,360))
         cnt = 0
         while cap.isOpened():
             ret, frame = cap.read()
@@ -64,30 +58,14 @@ class live_continual_seg_trainer(fs_incremental_trainer):
             img_chw = normalizer(img_chw)
             img_bchw = img_chw.view((1,) + img_chw.shape)
             pred_map = self.infer_one(img_bchw).cpu().numpy()[0]
-            label_vis = utils.visualize_segmentation(self.cfg, img_chw, pred_map, our_class_name)
+            label_vis = utils.visualize_segmentation(self.cfg, img_chw, pred_map, self.class_names)
             cv2.imshow('label', cv2.cvtColor(label_vis, cv2.COLOR_RGB2BGR))
             out.write(cv2.cvtColor(label_vis, cv2.COLOR_RGB2BGR))
-            if cnt == 25:
-                # cv2.imwrite("1.jpg", frame)
-                mask = Image.open('1_mask.png')
+            if cnt == 40:
+                mask = Image.open('corkscrew_01_clutter_1_frame_40.png')
                 mask = np.array(mask)
-                mask = mask / 255
                 mask = torch.tensor(mask).int()
-                self.novel_adapt_single(img_chw, mask, 'suitcase')
-            if cnt == 210:
-                # cv2.imwrite("2.jpg", frame)
-                mask = Image.open('2_mask.png')
-                mask = np.array(mask)
-                mask = mask / 255
-                mask = torch.tensor(mask).int()
-                self.novel_adapt_single(img_chw, mask, 'suitcase')
-            if cnt == 240:
-                # cv2.imwrite("3.jpg", frame)
-                mask = Image.open('3_mask.png')
-                mask = np.array(mask)
-                mask = mask / 255
-                mask = torch.tensor(mask).int()
-                self.novel_adapt_single(img_chw, mask, 'suitcase')
+                self.novel_adapt_single(img_chw, mask, 'corkscrew')
             cnt += 1
         out.release()
     
@@ -110,6 +88,7 @@ class live_continual_seg_trainer(fs_incremental_trainer):
         num_existing_class = self.post_processor.pixel_classifier.class_mat.weight.data.shape[0]
         img_roi, mask_roi = utils.crop_partial_img(img_chw, mask_hw)
         if obj_name not in self.psuedo_database:
+            self.class_names.append(obj_name)
             self.psuedo_database[obj_name] = [(img_chw, mask_hw, img_roi, mask_roi)]
             new_clf_weights = self.classifier_weight_imprinting_one(img_chw, mask_hw)
             self.post_processor.pixel_classifier.class_mat.weight.data = new_clf_weights
@@ -154,8 +133,6 @@ class live_continual_seg_trainer(fs_incremental_trainer):
             assert len(self.base_img_candidates) == memory_bank_size
         assert novel_obj_name in self.psuedo_database
         syn_img_chw, syn_mask_hw = self.train_set[base_img_idx]
-        if novel_obj_name == 'suitcase':
-            syn_mask_hw[syn_mask_hw == self.suitcase_idx] = target_id
         # Sample from partial data pool
         # Compute probability for synthesis
         candidate_classes = [c for c in self.psuedo_database.keys() if c != novel_obj_name]
@@ -175,7 +152,7 @@ class live_continual_seg_trainer(fs_incremental_trainer):
                 selected_class_id = self.img_name_id_map[selected_class]
                 selected_sample = random.choice(self.psuedo_database[selected_class])
                 _, _, img_roi, mask_roi = selected_sample
-                syn_img_chw, syn_mask_hw = self.copy_and_paste(img_roi, mask_roi, syn_img_chw, syn_mask_hw, selected_class_id)
+                syn_img_chw, syn_mask_hw = utils.copy_and_paste(img_roi, mask_roi, syn_img_chw, syn_mask_hw, selected_class_id)
 
         # Synthesize selected novel class
         if torch.rand(1) < selected_novel_prob:
@@ -183,7 +160,7 @@ class live_continual_seg_trainer(fs_incremental_trainer):
                 novel_class_id = self.img_name_id_map[novel_obj_name]
                 selected_sample = random.choice(self.psuedo_database[novel_obj_name])
                 _, _, img_roi, mask_roi = selected_sample
-                syn_img_chw, syn_mask_hw = self.copy_and_paste(img_roi, mask_roi, syn_img_chw, syn_mask_hw, novel_class_id)
+                syn_img_chw, syn_mask_hw = utils.copy_and_paste(img_roi, mask_roi, syn_img_chw, syn_mask_hw, novel_class_id)
 
         return (syn_img_chw, syn_mask_hw)
 
