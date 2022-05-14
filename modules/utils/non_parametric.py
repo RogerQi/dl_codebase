@@ -31,6 +31,7 @@ def masked_average_pooling(mask_b1hw, feature_bchw, normalization):
     return torch.mean(batch_pooled_vec, dim=0)
 
 def crop_partial_img(img_chw, mask_hw, cls_id=1):
+    mask_hw = torch.tensor(mask_hw)
     binary_mask_hw = (mask_hw == cls_id)
     binary_mask_hw_np = binary_mask_hw.numpy().astype(np.uint8)
     # RETR_EXTERNAL to keep online the outer contour
