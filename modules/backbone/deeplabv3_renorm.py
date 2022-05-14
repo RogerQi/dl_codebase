@@ -233,12 +233,14 @@ class Bottleneck(nn.Module):
 
         return out
 
+def batch_renorm_factory(planes, momentum=0.05):
+    return BatchRenorm2d(planes, momentum=momentum)
 
 class ResNet(backbone_base):
 
     def __init__(self, cfg, block, layers, num_groups=None, weight_std=False, beta=False):
         self.inplanes = 64
-        self.norm = lambda planes, momentum=0.05: BatchRenorm2d(planes, momentum=momentum)
+        self.norm = batch_renorm_factory
         self.conv = Conv2d if weight_std else nn.Conv2d
 
         super(ResNet, self).__init__(cfg)
