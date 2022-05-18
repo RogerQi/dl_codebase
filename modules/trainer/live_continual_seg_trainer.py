@@ -1,4 +1,3 @@
-import os
 import random
 import time
 import numpy as np
@@ -16,32 +15,164 @@ from tqdm import tqdm, trange
 from backbone.deeplabv3_renorm import BatchRenorm2d
 
 import utils
+import vision_hub
 
 from .seg_trainer import seg_trainer
 from .fs_incremental_trainer import fs_incremental_trainer
 from IPython import embed
+import threading
+
+from dataset.open_loris import OpenLORIS_single_sequence_reader
 
 memory_bank_size = 500
-infinite_memory_bank_size_flag = True
 
 class live_continual_seg_trainer(seg_trainer):
     def __init__(self, cfg, backbone_net, post_processor, criterion, dataset_module, device):
         super(live_continual_seg_trainer, self).__init__(cfg, backbone_net, post_processor, criterion, dataset_module, device)
+
+        self.normalizer = tv.transforms.Normalize(mean=self.cfg.DATASET.TRANSFORM.TRAIN.TRANSFORMS_DETAILS.NORMALIZE.mean,
+                                    std=self.cfg.DATASET.TRANSFORM.TRAIN.TRANSFORMS_DETAILS.NORMALIZE.sd)
         
         self.psuedo_database = {}
         self.img_name_id_map = {}
+        self.process_pool = {}
+
+        # TODO(roger): for dev purpose we don't use any heuristic now
+        np.random.seed(1234)
+        self.base_img_candidates = np.random.choice(np.arange(0, len(self.train_set)), replace=False, size=(memory_bank_size,))
+        self.class_names = deepcopy(self.train_set.dataset.CLASS_NAMES_LIST)
+
+        self.snapshot_dict = {}
+
+        # Network must either be in training/eval state
+        self.model_lock = threading.Lock()
+    
+    def take_snapshot(self):
+        # Save network arch to disk to avoid 
+        self.snapshot_dict['backbone_net'] = deepcopy(self.backbone_net.cpu())
+        self.snapshot_dict['post_processor'] = deepcopy(self.post_processor.cpu())
+        self.snapshot_dict['class_names'] = deepcopy(self.class_names)
+        self.snapshot_dict['psuedo_database'] = deepcopy(self.psuedo_database)
+        self.snapshot_dict['img_name_id_map'] = deepcopy(self.img_name_id_map)
+        self.backbone_net = self.backbone_net.to(self.device)
+        self.post_processor = self.post_processor.to(self.device)
+    
+    def restore_last_snapshot(self):
+        del self.backbone_net
+        del self.post_processor
+        self.backbone_net = self.snapshot_dict['backbone_net'].to(self.device)
+        self.post_processor = self.snapshot_dict['post_processor'].to(self.device)
+        self.class_names = self.snapshot_dict['class_names']
+        self.psuedo_database = self.snapshot_dict['psuedo_database']
+        self.img_name_id_map = self.snapshot_dict['img_name_id_map']
     
     def test_one(self, device):
         self.backbone_net.eval()
         self.post_processor.eval()
-        # TODO(roger): for dev purpose it uses the entire COCO dataset for replaying now
-        if infinite_memory_bank_size_flag:
-            self.base_img_candidates = list(range(len(self.train_set)))
-        else:
-            raise NotImplementedError
-        normalizer = tv.transforms.Normalize(mean=self.cfg.DATASET.TRANSFORM.TRAIN.TRANSFORMS_DETAILS.NORMALIZE.mean,
-                                    std=self.cfg.DATASET.TRANSFORM.TRAIN.TRANSFORMS_DETAILS.NORMALIZE.sd)
-        self.class_names = deepcopy(self.train_set.dataset.CLASS_NAMES_LIST)
+        num_clicks_spent = {}
+        my_ritm_segmenter = vision_hub.interactive_seg.ritm_segmenter()
+        max_clicks = 20
+        iou_thresh = 0.85 # for clicking
+        annotation_frame_idx = 20
+        offline_inference_iou_dict = {}
+        offline_inference_latency_dict = {}
+        online_inference_iou_dict = {}
+        online_inference_latency_dict = {}
+        recall_dict = {}
+        # 'paper_cutter_04'
+        for obj_name in ['paper_cutter_03', 'paper_cutter_02', 'paper_cutter_01']:
+            num_clicks_spent[obj_name] = 0
+            canonical_obj_name = '_'.join(obj_name.split('_')[:-1])
+            obj_index = obj_name.split('_')[-1]
+            my_seq_reader = OpenLORIS_single_sequence_reader('/data/OpenLORIS', obj_name, 'clutter', 1)
+            # Blocking offline evaluation to compute reference metrics
+            self.take_snapshot()
+            offline_inference_latency_dict[obj_name] = []
+            offline_inference_iou_dict[obj_name] = []
+            for i in range(len(my_seq_reader)):
+                img, mask = my_seq_reader[i]
+                img_chw = torch.tensor(img).float().permute((2, 0, 1))
+                img_chw = img_chw / 255 # norm to 0-1
+                img_chw = self.normalizer(img_chw)
+                img_bchw = img_chw.view((1,) + img_chw.shape)
+                start_cp = time.time()
+                pred_map = self.infer_one(img_bchw).cpu().numpy()[0]
+                offline_inference_latency_dict[obj_name].append(time.time() - start_cp)
+                label_vis = utils.visualize_segmentation(self.cfg, img_chw, pred_map, self.class_names)
+                if canonical_obj_name in self.class_names:
+                    binary_seg_metrics = utils.compute_binary_metrics(pred_map == self.class_names.index(canonical_obj_name), mask)
+                    iou = binary_seg_metrics['iou']
+                else:
+                    iou = 0
+                offline_inference_iou_dict[obj_name].append(iou)
+                cv2.imshow('label', cv2.cvtColor(label_vis, cv2.COLOR_RGB2BGR))
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+                if i == annotation_frame_idx:
+                    # Simulate user inputs. RITM segmeter 
+                    provided_mask, num_click = my_ritm_segmenter.auto_eval(img, mask, max_clicks=max_clicks, iou_thresh=iou_thresh)
+                    provided_mask = torch.tensor(provided_mask).int()
+                    num_clicks_spent[obj_name] += num_click
+                    self.novel_adapt_single(img_chw, provided_mask, canonical_obj_name, blocking=True)
+            print("[OFFLINE] Avg IoU: {:.4f} pm {:.4f}".format(
+                np.mean(offline_inference_iou_dict[obj_name]),
+                np.std(offline_inference_iou_dict[obj_name])))
+            print("[OFFLINE] Avg latency: {:.4f} w/ std: {:.4f}".format(
+                np.mean(offline_inference_latency_dict[obj_name]),
+                np.std(offline_inference_latency_dict[obj_name])))
+            # Non-blocking online evaluation
+            self.restore_last_snapshot()
+            online_inference_latency_dict[obj_name] = []
+            online_inference_iou_dict[obj_name] = []
+            recall_dict[obj_name] = []
+            for i in range(len(my_seq_reader)):
+                img, mask = my_seq_reader[i]
+                img_chw = torch.tensor(img).float().permute((2, 0, 1))
+                img_chw = img_chw / 255 # norm to 0-1
+                img_chw = self.normalizer(img_chw)
+                img_bchw = img_chw.view((1,) + img_chw.shape)
+                start_cp = time.time()
+                pred_map = self.infer_one(img_bchw).cpu().numpy()[0]
+                online_inference_latency_dict[obj_name].append(time.time() - start_cp)
+                label_vis = utils.visualize_segmentation(self.cfg, img_chw, pred_map, self.class_names)
+                if canonical_obj_name in self.class_names:
+                    binary_seg_metrics = utils.compute_binary_metrics(pred_map == self.class_names.index(canonical_obj_name), mask)
+                    iou = binary_seg_metrics['iou']
+                    recall_dict[obj_name].append(binary_seg_metrics['recall'])
+                else:
+                    iou = 0
+                online_inference_iou_dict[obj_name].append(iou)
+                cv2.imshow('label', cv2.cvtColor(label_vis, cv2.COLOR_RGB2BGR))
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+                if i == annotation_frame_idx:
+                    # Simulate user inputs. RITM segmeter 
+                    provided_mask, num_click = my_ritm_segmenter.auto_eval(img, mask, max_clicks=max_clicks, iou_thresh=iou_thresh)
+                    provided_mask = torch.tensor(provided_mask).int()
+                    num_clicks_spent[obj_name] += num_click
+                    self.novel_adapt_single(img_chw, provided_mask, canonical_obj_name, blocking=False)
+            print("[ONLINE] Avg IoU: {:.4f} pm {:.4f}".format(
+                np.mean(online_inference_iou_dict[obj_name]),
+                np.std(online_inference_iou_dict[obj_name])))
+            print("[ONLINE] Avg RECALL: {:.4f} pm {:.4f}".format(
+                np.mean(recall_dict[obj_name]),
+                np.std(recall_dict[obj_name])))
+            print("[ONLINE] Avg latency: {:.4f} w/ std: {:.4f}".format(
+                np.mean(online_inference_latency_dict[obj_name]), np.std(online_inference_latency_dict[obj_name])))
+            print("Main inference completed. Waiting for processes {} to finish".format(self.process_pool.keys()))
+            for process_name in self.process_pool:
+                self.process_pool[process_name].join()
+        embed(header='all end')
+    
+    def live_run(self, device):
+        self.infer_on_video()
+        print("Main inference completed. Waiting for processes {} to finish".format(self.process_pool.keys()))
+        for process_name in self.process_pool:
+            self.process_pool[process_name].join()
+    
+    def infer_on_video(self):
+        self.backbone_net.eval()
+        self.post_processor.eval()
         video_path = 'corkscrew_01_clutter_1.mp4'
         cap = cv2.VideoCapture(video_path)
         out = cv2.VideoWriter('output.mp4',cv2.VideoWriter_fourcc(*'mp4v'), 30.0, (640,360))
@@ -55,9 +186,11 @@ class live_continual_seg_trainer(seg_trainer):
             rgb_np = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             img_chw = torch.tensor(rgb_np).float().permute((2, 0, 1))
             img_chw = img_chw / 255 # norm to 0-1
-            img_chw = normalizer(img_chw)
+            img_chw = self.normalizer(img_chw)
             img_bchw = img_chw.view((1,) + img_chw.shape)
+            start_cp = time.time()
             pred_map = self.infer_one(img_bchw).cpu().numpy()[0]
+            print(f"infer time: {time.time() - start_cp}")
             label_vis = utils.visualize_segmentation(self.cfg, img_chw, pred_map, self.class_names)
             cv2.imshow('label', cv2.cvtColor(label_vis, cv2.COLOR_RGB2BGR))
             out.write(cv2.cvtColor(label_vis, cv2.COLOR_RGB2BGR))
@@ -70,32 +203,44 @@ class live_continual_seg_trainer(seg_trainer):
         out.release()
     
     def infer_one(self, img_bchw):
-       # Inference
-        data = img_bchw.to(self.device)
-        feature = self.backbone_net(data)
-        ori_spatial_res = data.shape[-2:]
-        output = self.post_processor(feature, ori_spatial_res)
-        pred_map = output.max(dim = 1)[1]
+        self.model_lock.acquire()
+        self.backbone_net.eval()
+        self.post_processor.eval()
+        # Inference
+        with torch.no_grad():
+            data = img_bchw.to(self.device)
+            feature = self.backbone_net(data)
+            ori_spatial_res = data.shape[-2:]
+            output = self.post_processor(feature, ori_spatial_res)
+            pred_map = output.max(dim = 1)[1]
+        self.model_lock.release()
         return pred_map
     
-    def novel_adapt_single(self, img_chw, mask_hw, obj_name):
+    def novel_adapt_single(self, img_chw, mask_hw, obj_name, blocking=True):
         """Adapt to a single image
 
         Args:
             img (torch.Tensor): Normalized RGB image tensor of shape (3, H, W)
             mask (torch.Tensor): Binary mask of novel object
         """
+        self.model_lock.acquire()
         num_existing_class = self.post_processor.pixel_classifier.class_mat.weight.data.shape[0]
         img_roi, mask_roi = utils.crop_partial_img(img_chw, mask_hw)
         if obj_name not in self.psuedo_database:
             self.class_names.append(obj_name)
             self.psuedo_database[obj_name] = [(img_chw, mask_hw, img_roi, mask_roi)]
             new_clf_weights = self.classifier_weight_imprinting_one(img_chw, mask_hw)
-            self.post_processor.pixel_classifier.class_mat.weight.data = new_clf_weights
+            self.post_processor.pixel_classifier.class_mat.weight = torch.nn.Parameter(new_clf_weights)
             self.img_name_id_map[obj_name] = num_existing_class # 0-indexed shift 1
         else:
             self.psuedo_database[obj_name].append((img_chw, mask_hw, img_roi, mask_roi))
-        self.finetune_backbone_one(obj_name)
+        self.model_lock.release()
+        if blocking:
+            self.finetune_backbone_one(obj_name)
+        else:
+            t = threading.Thread(target=self.finetune_backbone_one, args=(obj_name, ))
+            t.start()
+            self.process_pool['adaptation'] = t
 
     def classifier_weight_imprinting_one(self, supp_img_chw, supp_mask_hw):
         """Use masked average pooling to initialize a new 1x1 convolutional HEAD for semantic segmentation
@@ -126,11 +271,9 @@ class live_continual_seg_trainer(seg_trainer):
     
     def synthesizer_sample(self, novel_obj_name):
         # Uniformly sample from the memory buffer
-        target_id = self.img_name_id_map[novel_obj_name]
         base_img_idx = np.random.choice(self.base_img_candidates)
         assert base_img_idx in self.base_img_candidates
-        if not infinite_memory_bank_size_flag:
-            assert len(self.base_img_candidates) == memory_bank_size
+        assert len(self.base_img_candidates) == memory_bank_size
         assert novel_obj_name in self.psuedo_database
         syn_img_chw, syn_mask_hw = self.train_set[base_img_idx]
         # Sample from partial data pool
@@ -166,8 +309,7 @@ class live_continual_seg_trainer(seg_trainer):
 
     def finetune_backbone_one(self, novel_obj_name):
         prv_backbone_net = deepcopy(self.backbone_net).eval()
-        self.backbone_net.train()
-        self.post_processor.train()
+        scaler = torch.cuda.amp.GradScaler()
 
         trainable_params = [
             {"params": self.backbone_net.parameters()},
@@ -186,6 +328,7 @@ class live_continual_seg_trainer(seg_trainer):
         print("Froze {} BN/BRN layers".format(cnt))
 
         optimizer = optim.SGD(trainable_params, lr = self.cfg.TASK_SPECIFIC.GIFS.backbone_lr, momentum = 0.9)
+        optimizer.zero_grad() # sanity reset
         
         max_iter = self.cfg.TASK_SPECIFIC.GIFS.max_iter
         def polynomial_schedule(epoch):
@@ -207,24 +350,29 @@ class live_continual_seg_trainer(seg_trainer):
                     mask_list.append(mask_hw)
                 data_bchw = torch.stack(image_list).to(self.device).detach()
                 target_bhw = torch.stack(mask_list).to(self.device).detach()
-                feature = self.backbone_net(data_bchw)
-                ori_spatial_res = data_bchw.shape[-2:]
-                output = self.post_processor(feature, ori_spatial_res, scale_factor=10)
+                self.model_lock.acquire()
+                self.backbone_net.train()
+                self.post_processor.train()
+                with torch.cuda.amp.autocast():
+                    feature = self.backbone_net(data_bchw)
+                    ori_spatial_res = data_bchw.shape[-2:]
+                    output = self.post_processor(feature, ori_spatial_res, scale_factor=10)
 
-                # L2 regularization on feature extractor
-                with torch.no_grad():
-                    # self.vanilla_backbone_net for the base version
-                    ori_feature = prv_backbone_net(data_bchw)
+                    # L2 regularization on feature extractor
+                    with torch.no_grad():
+                        ori_feature = prv_backbone_net(data_bchw)
 
-                loss = self.criterion(output, target_bhw)
+                    loss = self.criterion(output, target_bhw)
 
-                # Feature extractor regularization + classifier regularization
-                regularization_loss = l2_criterion(feature, ori_feature)
-                regularization_loss = regularization_loss * self.cfg.TASK_SPECIFIC.GIFS.feature_reg_lambda # hyperparameter lambda
-                loss = loss + regularization_loss
+                    # Feature extractor regularization + classifier regularization
+                    regularization_loss = l2_criterion(feature, ori_feature)
+                    regularization_loss = regularization_loss * self.cfg.TASK_SPECIFIC.GIFS.feature_reg_lambda # hyperparameter lambda
+                    loss = loss + regularization_loss
 
                 optimizer.zero_grad() # reset gradient
-                loss.backward()
-                optimizer.step()
+                scaler.scale(loss).backward() # loss.backward()
+                scaler.step(optimizer) # optimizer.step()
+                scaler.update()
                 scheduler.step()
+                self.model_lock.release()
                 t.set_description_str("Loss: {:.4f}".format(loss.item()))
