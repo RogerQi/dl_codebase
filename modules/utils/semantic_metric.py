@@ -42,6 +42,21 @@ def compute_pixel_acc(pred, label, fg_only=True, masked_class=None):
     acc = float(correct_sum) / (valid_sum + 1e-10)
     return acc, valid_sum
 
+def compute_binary_metrics(pred, label, eps=1e-10):
+    pred = pred.astype(np.uint8)
+    label = label.astype(np.uint8)
+    tp = np.sum(np.logical_and(pred == 1, label == 1))
+    tn = np.sum(np.logical_and(pred == 0, label == 0))
+    fp = np.sum(np.logical_and(pred == 1, label == 0))
+    fn = np.sum(np.logical_and(pred == 0, label == 1))
+
+    return {
+        'acc': (tp + tn) / (tp + tn + fp + fn + eps),
+        'iou': tp / (tp + fp + fn + eps),
+        'recall': tp / (tp + fn + eps),
+        'precision': tp / (tp + fp + eps)
+    }
+
 def compute_iou(pred_map, label_map, num_classes, fg_only=False, ignore_mask=True, masked_class=None):
     """
     Param
