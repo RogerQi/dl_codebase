@@ -15,7 +15,7 @@ from tqdm import tqdm, trange
 from backbone.deeplabv3_renorm import BatchRenorm2d
 
 import utils
-import vision_hub
+#import vision_hub
 
 from .seg_trainer import seg_trainer
 from .fs_incremental_trainer import fs_incremental_trainer
@@ -34,7 +34,7 @@ class live_continual_seg_trainer(seg_trainer):
                                     std=self.cfg.DATASET.TRANSFORM.TRAIN.TRANSFORMS_DETAILS.NORMALIZE.sd)
         
         self.psuedo_database = {}
-        self.img_name_id_map = {}
+        self.cls_name_id_map = {}
         self.process_pool = {}
 
         # TODO(roger): for dev purpose we don't use any heuristic now
@@ -53,7 +53,7 @@ class live_continual_seg_trainer(seg_trainer):
         self.snapshot_dict['post_processor'] = deepcopy(self.post_processor.cpu())
         self.snapshot_dict['class_names'] = deepcopy(self.class_names)
         self.snapshot_dict['psuedo_database'] = deepcopy(self.psuedo_database)
-        self.snapshot_dict['img_name_id_map'] = deepcopy(self.img_name_id_map)
+        self.snapshot_dict['img_name_id_map'] = deepcopy(self.cls_name_id_map)
         self.backbone_net = self.backbone_net.to(self.device)
         self.post_processor = self.post_processor.to(self.device)
     
@@ -64,7 +64,7 @@ class live_continual_seg_trainer(seg_trainer):
         self.post_processor = self.snapshot_dict['post_processor'].to(self.device)
         self.class_names = self.snapshot_dict['class_names']
         self.psuedo_database = self.snapshot_dict['psuedo_database']
-        self.img_name_id_map = self.snapshot_dict['img_name_id_map']
+        self.cls_name_id_map = self.snapshot_dict['img_name_id_map']
     
     def test_one(self, device):
         self.backbone_net.eval()
@@ -78,9 +78,8 @@ class live_continual_seg_trainer(seg_trainer):
         offline_inference_latency_dict = {}
         online_inference_iou_dict = {}
         online_inference_latency_dict = {}
-        recall_dict = {}
-        # 'paper_cutter_04'
-        for obj_name in ['paper_cutter_03', 'paper_cutter_02', 'paper_cutter_01']:
+        precision_dict = {}
+        for obj_name in ['paper_cutter_01', 'paper_cutter_02', 'paper_cutter_03']:
             num_clicks_spent[obj_name] = 0
             canonical_obj_name = '_'.join(obj_name.split('_')[:-1])
             obj_index = obj_name.split('_')[-1]
@@ -124,7 +123,7 @@ class live_continual_seg_trainer(seg_trainer):
             self.restore_last_snapshot()
             online_inference_latency_dict[obj_name] = []
             online_inference_iou_dict[obj_name] = []
-            recall_dict[obj_name] = []
+            precision_dict[obj_name] = []
             for i in range(len(my_seq_reader)):
                 img, mask = my_seq_reader[i]
                 img_chw = torch.tensor(img).float().permute((2, 0, 1))
@@ -138,7 +137,7 @@ class live_continual_seg_trainer(seg_trainer):
                 if canonical_obj_name in self.class_names:
                     binary_seg_metrics = utils.compute_binary_metrics(pred_map == self.class_names.index(canonical_obj_name), mask)
                     iou = binary_seg_metrics['iou']
-                    recall_dict[obj_name].append(binary_seg_metrics['recall'])
+                    precision_dict[obj_name].append(binary_seg_metrics['precision'])
                 else:
                     iou = 0
                 online_inference_iou_dict[obj_name].append(iou)
@@ -154,15 +153,14 @@ class live_continual_seg_trainer(seg_trainer):
             print("[ONLINE] Avg IoU: {:.4f} pm {:.4f}".format(
                 np.mean(online_inference_iou_dict[obj_name]),
                 np.std(online_inference_iou_dict[obj_name])))
-            print("[ONLINE] Avg RECALL: {:.4f} pm {:.4f}".format(
-                np.mean(recall_dict[obj_name]),
-                np.std(recall_dict[obj_name])))
+            print("[ONLINE] Avg precision: {:.4f} pm {:.4f}".format(
+                np.mean(precision_dict[obj_name]),
+                np.std(precision_dict[obj_name])))
             print("[ONLINE] Avg latency: {:.4f} w/ std: {:.4f}".format(
                 np.mean(online_inference_latency_dict[obj_name]), np.std(online_inference_latency_dict[obj_name])))
             print("Main inference completed. Waiting for processes {} to finish".format(self.process_pool.keys()))
             for process_name in self.process_pool:
                 self.process_pool[process_name].join()
-        embed(header='all end')
     
     def live_run(self, device):
         self.infer_on_video()
@@ -231,7 +229,7 @@ class live_continual_seg_trainer(seg_trainer):
             self.psuedo_database[obj_name] = [(img_chw, mask_hw, img_roi, mask_roi)]
             new_clf_weights = self.classifier_weight_imprinting_one(img_chw, mask_hw)
             self.post_processor.pixel_classifier.class_mat.weight = torch.nn.Parameter(new_clf_weights)
-            self.img_name_id_map[obj_name] = num_existing_class # 0-indexed shift 1
+            self.cls_name_id_map[obj_name] = num_existing_class # 0-indexed shift 1
         else:
             self.psuedo_database[obj_name].append((img_chw, mask_hw, img_roi, mask_roi))
         self.model_lock.release()
@@ -280,10 +278,10 @@ class live_continual_seg_trainer(seg_trainer):
         # Compute probability for synthesis
         candidate_classes = [c for c in self.psuedo_database.keys() if c != novel_obj_name]
         # Gather some useful numbers
-        other_prob = 1
-        selected_novel_prob = 1
-        num_existing_objects = 0
-        num_novel_objects = 2
+        other_prob = 0.5
+        selected_novel_prob = 0.5
+        num_existing_objects = 1
+        num_novel_objects = 1
         assert other_prob >= 0 and other_prob <= 1
         assert selected_novel_prob >= 0 and selected_novel_prob <= 1
 
@@ -292,7 +290,7 @@ class live_continual_seg_trainer(seg_trainer):
             # select an old class
             for i in range(num_existing_objects):
                 selected_class = np.random.choice(candidate_classes)
-                selected_class_id = self.img_name_id_map[selected_class]
+                selected_class_id = self.cls_name_id_map[selected_class]
                 selected_sample = random.choice(self.psuedo_database[selected_class])
                 _, _, img_roi, mask_roi = selected_sample
                 syn_img_chw, syn_mask_hw = utils.copy_and_paste(img_roi, mask_roi, syn_img_chw, syn_mask_hw, selected_class_id)
@@ -300,7 +298,7 @@ class live_continual_seg_trainer(seg_trainer):
         # Synthesize selected novel class
         if torch.rand(1) < selected_novel_prob:
             for i in range(num_novel_objects):
-                novel_class_id = self.img_name_id_map[novel_obj_name]
+                novel_class_id = self.cls_name_id_map[novel_obj_name]
                 selected_sample = random.choice(self.psuedo_database[novel_obj_name])
                 _, _, img_roi, mask_roi = selected_sample
                 syn_img_chw, syn_mask_hw = utils.copy_and_paste(img_roi, mask_roi, syn_img_chw, syn_mask_hw, novel_class_id)
@@ -343,11 +341,27 @@ class live_continual_seg_trainer(seg_trainer):
             for iter_i in t:
                 image_list = []
                 mask_list = []
+                fully_labeled_flag = []
+                partial_positive_idx = []
                 for _ in range(batch_size):
-                    # synthesis
-                    img_chw, mask_hw = self.synthesizer_sample(novel_obj_name)
-                    image_list.append(img_chw)
-                    mask_list.append(mask_hw)
+                    if torch.rand(1) < 0.8:
+                        # synthesis
+                        img_chw, mask_hw = self.synthesizer_sample(novel_obj_name)
+                        image_list.append(img_chw)
+                        mask_list.append(mask_hw)
+                        fully_labeled_flag.append(True)
+                    else:
+                        # partially-labeled image
+                        img_chw, mask_hw, _, _ = random.choice(self.psuedo_database[novel_obj_name])
+                        # TODO: implement proper augmentation
+                        img_chw = tr_F.pad(img_chw, [(512 - img_chw.shape[2]) // 2, (512 - img_chw.shape[1]) // 2])
+                        mask_hw = tr_F.pad(mask_hw, [(512 - mask_hw.shape[1]) // 2, (512 - mask_hw.shape[0]) // 2])
+                        image_list.append(img_chw)
+                        mask_list.append(mask_hw)
+                        fully_labeled_flag.append(False)
+                        partial_positive_idx.append(self.cls_name_id_map[novel_obj_name])
+                partial_positive_idx = torch.tensor(partial_positive_idx)
+                fully_labeled_flag = torch.tensor(fully_labeled_flag)
                 data_bchw = torch.stack(image_list).to(self.device).detach()
                 target_bhw = torch.stack(mask_list).to(self.device).detach()
                 self.model_lock.acquire()
@@ -362,7 +376,34 @@ class live_continual_seg_trainer(seg_trainer):
                     with torch.no_grad():
                         ori_feature = prv_backbone_net(data_bchw)
 
-                    loss = self.criterion(output, target_bhw)
+                    # Fully-labeled image from memory-replay buffer
+                    # TODO: better variable naming!
+                    output_logit_bchw = F.softmax(output, dim=1)
+                    output_logit_bchw = torch.log(output_logit_bchw)
+                    loss = F.nll_loss(output_logit_bchw[fully_labeled_flag], target_bhw[fully_labeled_flag], ignore_index=-1)
+                    # loss = self.criterion(output[fully_labeled_flag], target_bhw[fully_labeled_flag])
+
+                    # Partially annotated image propagation using MiB loss
+                    if len(partial_positive_idx) > 0:
+                        partial_labeled_flag = torch.logical_not(fully_labeled_flag)
+                        output_logit_bchw = F.softmax(output[partial_labeled_flag], dim=1)
+                        # Reduce to 0/1 using MiB for NLL loss
+                        assert output_logit_bchw.shape[0] == len(partial_positive_idx)
+                        fg_prob_list = []
+                        bg_prob_list = []
+                        for b in range(output_logit_bchw.shape[0]):
+                            fg_prob_hw = output_logit_bchw[b,partial_positive_idx[b]]
+                            bg_prob_chw = output_logit_bchw[b,torch.arange(output_logit_bchw.shape[1]) != partial_positive_idx[b]]
+                            bg_prob_hw = torch.sum(bg_prob_chw, dim=0)
+                            fg_prob_list.append(fg_prob_hw)
+                            bg_prob_list.append(bg_prob_hw)
+                        fg_prob_map = torch.stack(fg_prob_list)
+                        bg_prob_map = torch.stack(bg_prob_list)
+                        reduced_output_bchw = torch.stack([bg_prob_map, fg_prob_map], dim=1)
+                        reduced_logit_bchw = torch.log(reduced_output_bchw)
+
+                        # TODO: test sum/mean
+                        loss = loss + F.nll_loss(reduced_logit_bchw, target_bhw[partial_labeled_flag], ignore_index=-1)
 
                     # Feature extractor regularization + classifier regularization
                     regularization_loss = l2_criterion(feature, ori_feature)
