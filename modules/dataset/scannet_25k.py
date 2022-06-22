@@ -20,9 +20,9 @@ class ScanNet25K(datasets.vision.VisionDataset):
     VAL_SPLIT_URL = "https://raw.githubusercontent.com/ScanNet/ScanNet/master/Tasks/Benchmark/scannetv2_val.txt"
     CLASS_NAMES_LIST = ['background', 'wall', 'floor', 'cabinet', 'bed', 'chair', 'sofa', 'table', 'door', 'window', 'bookshelf', 'picture', 'counter', 'desk', 'curtain', 'refrigerator', 'shower curtain', 'toilet', 'sink', 'bathtub', 'otherfurniture']
     VALID_CLASS_IDS = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 24, 28, 33, 34, 36, 39])
-    NYU_SCANNET_MAPPING = np.zeros(41) # NYU40 has 40 labels
+    NYU_SCANNET_MAPPING = np.zeros(41, dtype=np.int) - 1 # NYU40 has 40 labels
     for i in range(len(VALID_CLASS_IDS)):
-        NYU_SCANNET_MAPPING[VALID_CLASS_IDS[i]] = i + 1
+        NYU_SCANNET_MAPPING[VALID_CLASS_IDS[i]] = i
 
     def __init__(self, root, train=False):
         super(ScanNet25K, self).__init__(root, None, None, None)

@@ -16,7 +16,7 @@ class ADE20KSegReader(datasets.vision.VisionDataset):
     Data can be grabbed from http://data.csail.mit.edu/places/ADEchallenge/ADEChallengeData2016.zip
     '''
 
-    CLASS_NAMES_LIST = ["background", "wall", "building", "sky", "floor", "tree", "ceiling", "road", "bed", "windowpane", "grass", "cabinet", "sidewalk", "person", "earth", "door", "table", "mountain", "plant", "curtain", "chair", "car", "water", "painting", "sofa", "shelf", "house", "sea", "mirror", "rug", "field", "armchair", "seat", "fence", "desk", "rock", "wardrobe", "lamp", "bathtub", "railing", "cushion", "base", "box", "column", "signboard", "chest", "counter", "sand", "sink", "skyscraper", "fireplace", "refrigerator", "grandstand", "path", "stairs", "runway", "case", "pool", "pillow", "screen", "stairway", "river", "bridge", "bookcase", "blind", "coffee", "toilet", "flower", "book", "hill", "bench", "countertop", "stove", "palm", "kitchen", "computer", "swivel", "boat", "bar", "arcade", "hovel", "bus", "towel", "light", "truck", "tower", "chandelier", "awning", "streetlight", "booth", "television", "airplane", "dirt", "apparel", "pole", "land", "bannister", "escalator", "ottoman", "bottle", "buffet", "poster", "stage", "van", "ship", "fountain", "conveyer", "canopy", "washer", "plaything", "swimming", "stool", "barrel", "basket", "waterfall", "tent", "bag", "minibike", "cradle", "oven", "ball", "food", "step", "tank", "trade", "microwave", "pot", "animal", "bicycle", "lake", "dishwasher", "screen", "blanket", "sculpture", "hood", "sconce", "vase", "traffic", "tray", "ashcan", "fan", "pier", "crt", "plate", "monitor", "bulletin", "shower", "radiator", "glass", "clock", "flag"]
+    CLASS_NAMES_LIST = ["wall", "building", "sky", "floor", "tree", "ceiling", "road", "bed", "windowpane", "grass", "cabinet", "sidewalk", "person", "earth", "door", "table", "mountain", "plant", "curtain", "chair", "car", "water", "painting", "sofa", "shelf", "house", "sea", "mirror", "rug", "field", "armchair", "seat", "fence", "desk", "rock", "wardrobe", "lamp", "bathtub", "railing", "cushion", "base", "box", "column", "signboard", "chest", "counter", "sand", "sink", "skyscraper", "fireplace", "refrigerator", "grandstand", "path", "stairs", "runway", "case", "pool", "pillow", "screen", "stairway", "river", "bridge", "bookcase", "blind", "coffee", "toilet", "flower", "book", "hill", "bench", "countertop", "stove", "palm", "kitchen", "computer", "swivel", "boat", "bar", "arcade", "hovel", "bus", "towel", "light", "truck", "tower", "chandelier", "awning", "streetlight", "booth", "television", "airplane", "dirt", "apparel", "pole", "land", "bannister", "escalator", "ottoman", "bottle", "buffet", "poster", "stage", "van", "ship", "fountain", "conveyer", "canopy", "washer", "plaything", "swimming", "stool", "barrel", "basket", "waterfall", "tent", "bag", "minibike", "cradle", "oven", "ball", "food", "step", "tank", "trade", "microwave", "pot", "animal", "bicycle", "lake", "dishwasher", "screen", "blanket", "sculpture", "hood", "sconce", "vase", "traffic", "tray", "ashcan", "fan", "pier", "crt", "plate", "monitor", "bulletin", "shower", "radiator", "glass", "clock", "flag"]
 
     def __init__(self, root, train=True):
         '''
@@ -49,6 +49,10 @@ class ADE20KSegReader(datasets.vision.VisionDataset):
         assert(raw_img.size[0] == segm.size[0])
         assert(raw_img.size[1] == segm.size[1])
         seg_mask = torch.tensor(np.array(segm, dtype = np.uint8), dtype = torch.int64)
+        # ADE20K ignores background labels
+        # https://github.com/CSAILVision/semantic-segmentation-pytorch/blob/master/mit_semseg/dataset.py#L61
+        # https://github.com/open-mmlab/mmsegmentation/blob/54bd4bdd82c7aa1c0ea7220b5a0672a8326e4134/mmseg/datasets/ade.py#L17
+        seg_mask = seg_mask - 1
         # seg_mask = self.label_unifier(seg_mask)
         return (raw_img, seg_mask)
 
