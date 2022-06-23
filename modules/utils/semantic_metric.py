@@ -51,6 +51,10 @@ def compute_binary_metrics(pred, label, eps=1e-10):
     fn = np.sum(np.logical_and(pred == 0, label == 1))
 
     return {
+        'tp': tp,
+        'tn': tn,
+        'fp': fp,
+        'fn': fn,
         'acc': (tp + tn) / (tp + tn + fp + fn + eps),
         'iou': tp / (tp + fp + fn + eps),
         'recall': tp / (tp + fn + eps),
