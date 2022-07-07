@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 import zipfile
 
-root_dir = "/media/roger/My Book/data/scannet_v2"
+root_dir = "/media/eason/My Passport/data/scannet_v2"
 
 label_file = os.path.join(root_dir, 'scannetv2-labels.combined.tsv')
 
