@@ -63,6 +63,7 @@ class live_continual_seg_trainer(seg_trainer):
         self.post_processor = self.post_processor.to(self.device)
     
     def restore_last_snapshot(self):
+        self.model_lock.acquire()
         del self.backbone_net
         del self.post_processor
         self.backbone_net = self.snapshot_dict['backbone_net'].to(self.device)
@@ -70,6 +71,7 @@ class live_continual_seg_trainer(seg_trainer):
         self.class_names = self.snapshot_dict['class_names']
         self.psuedo_database = self.snapshot_dict['psuedo_database']
         self.cls_name_id_map = self.snapshot_dict['img_name_id_map']
+        self.model_lock.release()
     
     def test_one(self, device):
         self.backbone_net.eval()

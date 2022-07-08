@@ -25,6 +25,7 @@ from flask_cors import CORS
 import base64
 from torch.nn.functional import interpolate
 import os
+import threading
 
 IMAGE_WIDTH = 640
 IMAGE_HEIGHT = 360
@@ -37,6 +38,7 @@ camera.set(3, IMAGE_WIDTH)
 camera.set(4, IMAGE_HEIGHT)
 my_trainer = None
 normalizer = None
+sem = threading.Lock()
 
 def parse_args():
     parser = argparse.ArgumentParser(description = "Roger's Deep Learning Playground")
@@ -133,6 +135,22 @@ def take_snapshot():
             response.headers.add('Access-Control-Allow-Origin', '*')
         return response
 
+@app.route('/undo', methods=['POST'])
+def undo_finetune():
+    # it should be used only after training end
+    sem.acquire()
+    if my_trainer.my_aot_segmenter.frame_cnt == 0:
+        my_trainer.restore_last_snapshot()
+        response = jsonify({'status': "success"})
+    else:
+        print("cannot restore snapshot in training period")
+        response = jsonify({'status': "faild"})
+    
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    sem.release()
+    return response
+    
+
 @app.route('/trigger_finetune', methods=['POST'])
 def trigger_fine_tune():
     img_bytes = request.files['file'].read()
@@ -157,7 +175,7 @@ def trigger_fine_tune():
     print("image shape: ", img.shape, "mask shape: ", mask.shape)
     # print(img[0, 0, 0], mask[0, 0])
 
-    my_trainer.novel_adapt_single(img, mask, label, blocking=True)
+    my_trainer.novel_adapt_single(img, mask, label, blocking=True )
 
     print("switch back to segmentation model inference only")
     my_trainer.my_aot_segmenter.frame_cnt = 0 # switch back to segmentation model inference only
@@ -196,6 +214,7 @@ def main():
 
     trainer_func = trainer.dispatcher(cfg)
     my_trainer = trainer_func(cfg, backbone_net, post_processor, criterion, dataset_module, device)
+    
     os.chdir("/home/eason/code_base/dl_codebase/")
     print("Initializing backbone with trained weights from: {}".format(args.load))
     my_trainer.load_model(args.load)
@@ -204,6 +223,7 @@ def main():
                 std=cfg.DATASET.TRANSFORM.TRAIN.TRANSFORMS_DETAILS.NORMALIZE.sd)
                 
     #start our flask backend
+    my_trainer.take_snapshot()
     app.run(debug=False, port=7000)
 
 main()
