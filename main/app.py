@@ -24,6 +24,7 @@ import torchvision as tv
 from flask_cors import CORS
 import base64
 from torch.nn.functional import interpolate
+import os
 
 IMAGE_WIDTH = 640
 IMAGE_HEIGHT = 360
@@ -66,8 +67,10 @@ def gen_frames_with_pred():
             img_chw = torch.tensor(rgb_np).float().permute((2, 0, 1))
             img_chw = img_chw / 255 # norm to 0-1
             img_chw = normalizer(img_chw)
-            img_bchw = img_chw.view((1,) + img_chw.shape)
-            pred_map = my_trainer.infer_one(img_bchw).cpu().numpy()[0]
+            # img_bchw = img_chw.view((1,) + img_chw.shape)
+            # pred_map = my_trainer.infer_one(img_bchw).cpu().numpy()[0]
+            pred_map = my_trainer.infer_one_aot(rgb_np)
+            #print(pred_map.max(), len(my_trainer.class_names))
             label_vis = utils.visualize_segmentation(my_trainer.cfg, img_chw, pred_map, my_trainer.class_names)
             frame = cv2.cvtColor(label_vis, cv2.COLOR_RGB2BGR)
             ret, buffer = cv2.imencode('.jpg', frame)
@@ -139,18 +142,25 @@ def trigger_fine_tune():
 
     img = pickle.loads(img_bytes)
     mask = pickle.loads(mask_bytes)
+    ref_img = np.array(img, dtype='uint8')
     img = torch.LongTensor(img)/255.0
     mask = torch.LongTensor(mask)
     # print("image shape: ", img.shape, "mask shape: ", mask.shape)
-
+    my_trainer.my_aot_segmenter.reset_engine()
+    print("reset VOS engine")
+    my_trainer.my_aot_segmenter.add_reference_frame(ref_img, mask.cpu().numpy())
+    print("added reference frame, start inference with VOS result")
     # img = interpolate(img, scale_factor=0.5)
     # mask = interpolate(mask, scale_factor=0.5)
     img = torch.permute(img, (2, 0, 1))
     print("start adapt a single shot with label: ", label)
     print("image shape: ", img.shape, "mask shape: ", mask.shape)
     # print(img[0, 0, 0], mask[0, 0])
-    my_trainer.novel_adapt_single(img, mask, label)
-    
+
+    my_trainer.novel_adapt_single(img, mask, label, blocking=True)
+
+    print("switch back to segmentation model inference only")
+    my_trainer.my_aot_segmenter.frame_cnt = 0 # switch back to segmentation model inference only
     response = jsonify({'status': "success"})
     response.headers.add('Access-Control-Allow-Origin', '*')
     return response
@@ -164,7 +174,7 @@ def main():
     args = parse_args()
     update_config_from_yaml(cfg, args)
 
-    if cfg.name != "GIFS_coco_things":
+    if cfg.name != "GIFS_scannet25k_from_coco":
         print("wrong cfg for backend server!")
         return
 
@@ -186,7 +196,7 @@ def main():
 
     trainer_func = trainer.dispatcher(cfg)
     my_trainer = trainer_func(cfg, backbone_net, post_processor, criterion, dataset_module, device)
-
+    os.chdir("/home/eason/code_base/dl_codebase/")
     print("Initializing backbone with trained weights from: {}".format(args.load))
     my_trainer.load_model(args.load)
 

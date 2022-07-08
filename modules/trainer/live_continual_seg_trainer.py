@@ -16,7 +16,7 @@ from tqdm import tqdm, trange
 from backbone.deeplabv3_renorm import BatchRenorm2d
 
 import utils
-#import vision_hub
+import vision_hub
 
 from .seg_trainer import seg_trainer
 from .fs_incremental_trainer import fs_incremental_trainer
@@ -46,6 +46,8 @@ class live_continual_seg_trainer(seg_trainer):
         self.snapshot_dict = {}
 
         self.my_aot_segmenter = vision_hub.aotb.aot_segmenter()
+
+        self.novel_idx = 20
 
         # Network must either be in training/eval state
         self.model_lock = threading.Lock()
@@ -287,8 +289,35 @@ class live_continual_seg_trainer(seg_trainer):
             print("havn't add reference frame for aot segmenter")
             return
         pred_label = self.my_aot_segmenter.propagate_one_frame(img)
-        print(pred_label.shape)
+        # print(pred_label.shape)
         pred_map[pred_label == 1] = 21
+        return pred_map
+    
+    def infer_one_aot(self, img):
+        """
+            for our web app
+        """
+        self.model_lock.acquire()
+        self.backbone_net.eval()
+        self.post_processor.eval()
+        # Inference
+        img_chw = torch.tensor(img).float().permute((2, 0, 1))
+        img_chw = img_chw / 255 # norm to 0-1
+        img_chw = self.normalizer(img_chw)
+        img_bchw = img_chw.view((1,) + img_chw.shape)
+        with torch.no_grad():
+            data = img_bchw.to(self.device)
+            feature = self.backbone_net(data)
+            ori_spatial_res = data.shape[-2:]
+            output = self.post_processor(feature, ori_spatial_res)
+            pred_map = output.max(dim = 1)[1]
+        pred_map = pred_map.cpu().numpy()[0]
+        if self.my_aot_segmenter.frame_cnt > 0:
+            # print("infer result with VOS-AOTB assistance")
+            pred_label = self.my_aot_segmenter.propagate_one_frame(img)
+            pred_map[pred_map == self.novel_idx] = 0
+            pred_map[pred_label == 1] = self.novel_idx
+        self.model_lock.release()
         return pred_map
     
     def novel_adapt_single(self, img_chw, mask_hw, obj_name, blocking=True):
@@ -301,6 +330,7 @@ class live_continual_seg_trainer(seg_trainer):
         self.model_lock.acquire()
         num_existing_class = self.post_processor.pixel_classifier.class_mat.weight.data.shape[0]
         img_roi, mask_roi = utils.crop_partial_img(img_chw, mask_hw)
+        self.novel_idx += 1
         if obj_name not in self.psuedo_database:
             self.class_names.append(obj_name)
             self.psuedo_database[obj_name] = [(img_chw, mask_hw, img_roi, mask_roi)]
@@ -316,6 +346,7 @@ class live_continual_seg_trainer(seg_trainer):
             t = threading.Thread(target=self.finetune_backbone_one, args=(obj_name, ))
             t.start()
             self.process_pool['adaptation'] = t
+        
 
     def classifier_weight_imprinting_one(self, supp_img_chw, supp_mask_hw):
         """Use masked average pooling to initialize a new 1x1 convolutional HEAD for semantic segmentation
