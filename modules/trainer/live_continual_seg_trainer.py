@@ -192,7 +192,7 @@ class live_continual_seg_trainer(seg_trainer):
                     found_novel_obj = True
                     self.my_aot_segmenter.reset_engine()
                     label = deepcopy(provided_mask)
-                    label[label == 1] = 21
+                    # label[label == 1] = 21
                     self.my_aot_segmenter.add_reference_frame(img, label.cpu().numpy())
                     
                     self.novel_adapt_single(img_chw, provided_mask, canonical_obj_name, blocking=False)
@@ -287,7 +287,7 @@ class live_continual_seg_trainer(seg_trainer):
             print("havn't add reference frame for aot segmenter")
             return
         pred_label = self.my_aot_segmenter.propagate_one_frame(img)
-        
+        print(pred_label.shape)
         pred_map[pred_label == 1] = 21
         return pred_map
     

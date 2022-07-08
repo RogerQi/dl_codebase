@@ -18,6 +18,10 @@ import torch.optim as optim
 import torch.nn.functional as F
 import torchvision as tv
 
+import os
+import json
+import zipfile
+
 EVAL_SCENE_NAME = ['scene0050_00', 'scene0565_00', 'scene0462_00', 'scene0144_00', 'scene0593_00']
 SCANNET_PATH = "/media/eason/My Passport/data/scannet_v2"
 
@@ -35,12 +39,56 @@ def parse_args():
 
     return args
 
+def parse_seg_groups(ann_json):
+    # return a dictionary
+    # key: segment idx
+    # value: object idx
+    all_inst_list = ann_json['segGroups']
+    ret_dict = {}
+    ret_obj_idx = []
+    ret_obj_names = {}
+    for inst in all_inst_list:
+        object_idx = inst['objectId'] + 1 # from 0-indexed to 1-indexed for background
+        assert object_idx > 0
+        ret_obj_idx.append(object_idx)
+        ret_obj_names[object_idx] = inst['label']
+        segment_list = inst['segments']
+        for seg in segment_list:
+            assert seg not in ret_dict
+            ret_dict[seg] = object_idx
+    return ret_dict, ret_obj_idx, ret_obj_names
+
+def get_scene_info(scene_name):
+    """ random a novel object from the "other objects" list
+    
+    Args:
+        scene_name (string): scannet scene name.
+    
+    Return: (string) canonical_obj_name: object that need annotation.
+
+    """
+    my_seq_reader = scannet_scene_reader("/media/eason/My Passport/data/scannet_v2", scene_name)
+
+    object_info = {}
+
+    for i in range(len(my_seq_reader)):
+        data_dict = my_seq_reader[i]
+        mask = data_dict['semantic_label']
+
+        
+
+    fine_grained_annotation_file = '{}_vh_clean.aggregation.json'
+    fine_grained_annotation_json_path = os.path.join(SCANNET_PATH, scene_name, fine_grained_annotation_file.format(scene_name))
+    with open(fine_grained_annotation_json_path) as f:
+        ann_json = json.load(f)
+    
+    segment_obj_map, obj_idx_list, obj_name_map = parse_seg_groups(ann_json)
+    pass
 
 def evaluation(model, segmenter, vos_engine=None):
     model.prepare_for_eval()
     normalizer = model.normalizer
 
-    offline_inference_latency_dict = {}
     online_inference_latency_dict = {}
     precision_dict = {}    
     num_clicks_spent = {}
@@ -50,7 +98,7 @@ def evaluation(model, segmenter, vos_engine=None):
 
         # Blocking offline evaluation to compute reference metrics
         model.take_snapshot()
-        offline_inference_latency_dict[scene] = []
+        online_inference_latency_dict[scene] = []
         for i in range(len(seq_reader)):
             data_dict = seq_reader[i]
             img = data_dict['color']
@@ -63,18 +111,18 @@ def evaluation(model, segmenter, vos_engine=None):
             # computer latency for single inferencing single image
             start_cp = time.time()
             pred_map = model.infer_one(img_bchw).cpu().numpy()[0]
-            offline_inference_latency_dict[scene].append(time.time() - start_cp)
+            online_inference_latency_dict[scene].append(time.time() - start_cp)
 
             # label_vis = utils.visualize_segmentation(self.cfg, img_chw, pred_map, self.class_names)
             if canonical_obj_name in model.class_names:
                 # Seen this object before, eval
                 intersection, union = utils.compute_iu(pred_map, mask, num_classes=22, fg_only=True)
-                if offline_intersection is None:
-                    offline_intersection = intersection
-                    offline_union = union
+                if online_intersection is None:
+                    online_intersection = intersection
+                    online_union = union
                 else:
-                    offline_intersection += intersection
-                    offline_union += union
+                    online_intersection += intersection
+                    online_union += union
 
 
 
@@ -115,10 +163,12 @@ def main():
     # set up segmenter
     my_ritm_segmenter = vision_hub.interactive_seg.ritm_segmenter()
 
+    my_vos_engine = vision_hub.aotb.aot_segmenter()
+
     # set up model (for now is the trainer)
     my_trainer = get_trainer(cfg, device, args.load)
     
-    evaluation(model=my_trainer, segmenter=my_ritm_segmenter)
+    evaluation(model=my_trainer, segmenter=my_ritm_segmenter, vos_engine=my_vos_engine)
 
 if __name__ == '__main__':
     main()
