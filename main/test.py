@@ -14,6 +14,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
+import os
 
 def parse_args():
     parser = argparse.ArgumentParser(description = "Roger's Deep Learning Playground")
@@ -65,7 +66,7 @@ def main():
 
     trainer_func = trainer.dispatcher(cfg)
     my_trainer = trainer_func(cfg, backbone_net, post_processor, criterion, dataset_module, device)
-
+    os.chdir("/home/eason/code_base/dl_codebase/")
     print("Initializing backbone with trained weights from: {}".format(args.load))
     my_trainer.load_model(args.load)
 

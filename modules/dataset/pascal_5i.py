@@ -131,49 +131,6 @@ class Pascal5iReader(torchvision.datasets.vision.VisionDataset):
             target_tensor[ignore_pixel_idx] = -1
         return target_tensor
 
-class PartialPascalReader(torchvision.datasets.vision.VisionDataset):
-    def __init__(self, root, split, exclusion_list):
-        """
-        Reader that partially reads the PASCAL dataset
-        """
-        super(PartialPascalReader, self).__init__(root, None, None, None)
-        self.vanilla_ds = PascalVOCSegReader(root, split, download=True)
-
-        self.CLASS_NAMES_LIST = self.vanilla_ds.CLASS_NAMES_LIST
-
-        self.label_list = []
-
-        for l in self.vanilla_ds.get_label_range():
-            if l in exclusion_list:
-                continue
-            self.label_list.append(l)
-        
-        self.label_list = sorted(self.label_list)
-
-        self.subset_idx = [i for i in range(len(self.vanilla_ds))]
-        self.subset_idx = set(self.subset_idx)
-
-        for l in exclusion_list:
-            self.subset_idx -= set(self.vanilla_ds.get_class_map(l))
-        self.subset_idx = sorted(list(self.subset_idx))
-    
-    def __len__(self):
-        return len(self.subset_idx)
-    
-    def get_class_map(self, class_id):
-        """
-        class_id here is subsetted. (e.g., class_idx is 12 in vanilla dataset may get translated to 2)
-        """
-        raise NotImplementedError
-    
-    def get_label_range(self):
-        return deepcopy(self.label_list)
-
-    def __getitem__(self, idx: int):
-        assert 0 <= idx and idx < len(self.subset_idx)
-        img, target_tensor = self.vanilla_ds[self.subset_idx[idx]]
-        return img, target_tensor
-
 def get_train_set(cfg):
     folding = cfg.DATASET.PASCAL5i.folding
     ds = Pascal5iReader(utils.get_dataset_root(), folding, True, True, exclude_novel=True)

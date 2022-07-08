@@ -1,9 +1,9 @@
-name: 'GIFS_coco_things'
+name: 'GIFS_scannet25k_from_coco'
 task: 'live_continual_seg'
 input_dim: (3, 512, 512)
-num_classes: 81
-meta_training_num_classes: 81 # (15 annotated class in splitted training set + 1 background)
-meta_testing_num_classes: 81
+num_classes: 21
+meta_training_num_classes: 21 # (15 annotated class in splitted training set + 1 background)
+meta_testing_num_classes: 21
 save_model: True
 
 SYSTEM:
@@ -13,7 +13,7 @@ BACKBONE:
   network: 'deeplabv3_resnet101_renorm'
   pooling: False
   use_pretrained: True
-  pretrained_path: "/data/pretrained_model/resnet101-5d3b4d8f.pth"
+  pretrained_path: "GIFS_coco_things_epoch20_0.5526.pt"
 
 CLASSIFIER:
   classifier: "seg_cos"
@@ -22,7 +22,7 @@ LOSS:
   loss: 'semantic_nllloss'
 
 DATASET:
-  dataset: 'coco2017'
+  dataset: 'scannet_25k'
   TRANSFORM:
     TRAIN:
       transforms: ('normalize', )
@@ -43,7 +43,7 @@ DATASET:
 TRAIN:
   max_epochs: 20
   batch_size: 32
-  initial_lr: 0.007
+  initial_lr: 1e-3
   lr_scheduler: "polynomial"
   log_interval: 200
   OPTIMIZER:
