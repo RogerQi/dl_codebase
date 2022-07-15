@@ -18,7 +18,9 @@ class ScanNet25K(datasets.vision.VisionDataset):
     # https://github.com/ScanNet/ScanNet/blob/master/BenchmarkScripts/3d_evaluation/evaluate_semantic_label.py
     TRAIN_SPLIT_URL = "https://raw.githubusercontent.com/ScanNet/ScanNet/master/Tasks/Benchmark/scannetv2_train.txt"
     VAL_SPLIT_URL = "https://raw.githubusercontent.com/ScanNet/ScanNet/master/Tasks/Benchmark/scannetv2_val.txt"
-    CLASS_NAMES_LIST = ['background', 'wall', 'floor', 'cabinet', 'bed', 'chair', 'sofa', 'table', 'door', 'window', 'bookshelf', 'picture', 'counter', 'desk', 'curtain', 'refrigerator', 'shower curtain', 'toilet', 'sink', 'bathtub', 'otherfurniture']
+    CLASS_NAMES_LIST = ['wall', 'floor', 'cabinet', 'bed', 'chair', 'sofa', 'table', 'door', 'window',\
+        'bookshelf', 'picture', 'counter', 'desk', 'curtain', 'refrigerator', 'shower curtain', 'toilet',\
+            'sink', 'bathtub', 'otherfurniture']
     VALID_CLASS_IDS = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 24, 28, 33, 34, 36, 39])
     NYU_SCANNET_MAPPING = np.zeros(41, dtype=np.int) - 1 # NYU40 has 40 labels
     for i in range(len(VALID_CLASS_IDS)):
