@@ -62,7 +62,7 @@ def main():
     if cfg.BACKBONE.use_pretrained:
         weight_path = cfg.BACKBONE.pretrained_path
         print("Initializing backbone with pretrained weights from: {}".format(weight_path))
-        pretrained_weight_dict = torch.load(weight_path, map_location=device)
+        pretrained_weight_dict = torch.load(weight_path)
         # Log missing/uncompatible keys
         if 'backbone' in pretrained_weight_dict:
             print(backbone_net.load_state_dict(pretrained_weight_dict['backbone'], strict=False))
