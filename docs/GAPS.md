@@ -16,11 +16,17 @@ Fortunately, torchvision has routines for conveniently downloading both of these
 
 TBD
 
-## Pretrained Models
+## ImageNet-Pretrained Models
 
 Like many other few-shot/incremental/general segmentation works, GAPS is trained from ImageNet pretrained weights. In particular, for fair comparisons with existing works, we follow their implementations and also use ResNet-101. The pretrained weights can be downloaded from https://download.pytorch.org/models/resnet101-5d3b4d8f.pth [Other ResNet weights can be found here](https://pytorch.org/vision/0.8/_modules/torchvision/models/resnet.html).
 
 By default, the model loads weights from `/data/pretrained_model/resnet101-5d3b4d8f.pth` as defined [here](https://github.com/RogerQi/dl_codebase/blob/roger/submission/configs/fs_incremental/pascal5i_base.yaml#L16).
+
+## Context-aware Network
+
+GAPS uses a scene classification model trained on the Places365 dataset to compute scene embedding for images, so that pairwise scene similarity comparisons can be done via comparing metrics of scene embeddings.
+
+The trained VGG16 network can be found here: [box](https://uofi.box.com/s/w6mtgeg79q2h9228c4plmitha7du77d2).
 
 ## Running GAPS
 
@@ -31,7 +37,18 @@ cd dl_codebase # run from project root
 python3 main/train.py --cfg configs/fs_incremental/pascal5i_split3_5shot.yaml
 ```
 
-If you want to skip the prolonged base learning stage, you can find weights trained from the base stage at TBD.
+If you want to skip the prolonged base learning stage, you can find weights trained from the base stage in the table below.
+
+| Dataset | Base IoU | Novel IoU | Base weights |
+| --- | --- | --- | --- |
+| Pascal-5-0 | TBD | TBD | [box](https://uofi.box.com/s/qwjpio1xubzp2h87vzmnosvff3kt2sfz) |
+| Pascal-5-1 | TBD | TBD | [box](https://uofi.box.com/s/3b4opya1qmhztnn2mxaqjce32izvuvep) |
+| Pascal-5-2 | TBD | TBD | [box](https://uofi.box.com/s/s9tb3jcl2n1vi73iu2e482to1txfhyhs) |
+| Pascal-5-3 | TBD | TBD | [box](https://uofi.box.com/s/1fhmkne8pm8l8ucsg4uazlisioito8f1) |
+| COCO-20-0 | TBD | TBD | TBD |
+| COCO-20-1 | TBD | TBD | [box](https://uofi.box.com/s/ccrosqwpks20ik5u50btxyfhf5776mjn) |
+| COCO-20-2 | TBD | TBD | TBD |
+| COCO-20-3 | TBD | TBD | TBD |
 
 After base learning stage, it will generate a weight named `GIFS_pascal_voc_split3_final.pt` at the project root. To perform incremental learning and testing, the command line to be invoked is
 
