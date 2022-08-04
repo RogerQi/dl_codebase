@@ -15,6 +15,7 @@ class fc(nn.Module):
         net_list = []
         for i in range(len(latent_space_dim) - 1):
             net_list.append(nn.Linear(latent_space_dim[i], latent_space_dim[i + 1], bias = cfg.CLASSIFIER.FC.bias))
+            # Last layer does not use ReLU
             if i != len(latent_space_dim) - 2:
                 net_list.append(nn.ReLU())
         print(net_list)
