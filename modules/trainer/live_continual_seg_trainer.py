@@ -77,71 +77,74 @@ class live_continual_seg_trainer(seg_trainer):
         iou_thresh = 0.85 # for clicking
         annotation_frame_idx = 30
         minimum_instance_size = 2000
-        online_inference_latency_dict = {}
-        precision_dict = {}
         delay_violation_cnt = 0
         with open('metadata/scannet_map.pkl', 'rb') as f:
             obj_scene_map = pickle.load(f)
         interest_obj_list = sorted(list(obj_scene_map.keys()))
-        for canonical_obj_name in ['laundry basket']:
-            for scene_name in obj_scene_map[canonical_obj_name][:-2]:
+        for canonical_obj_name in ["printer"]:
+            for scene_name in obj_scene_map[canonical_obj_name]:
                 if scene_name in obj_scene_map[canonical_obj_name][-2:]:
                     generalization_test = True
+                    print("Testing generalization")
                 else:
                     generalization_test = False
                 num_clicks_spent[scene_name] = 0
-                my_seq_reader = scannet_scene_reader("/media/roger/My Book/data/scannet_v2", scene_name)
-                inst_name_map = my_seq_reader.get_inst_name_map()
-                online_inference_latency_dict[scene_name] = []
+                my_seq_reader = scannet_scene_reader("/media/roger/My Book/data/scannet_v2", scene_name, canonical_obj_name)
+                print(f"Working on scene name {scene_name} with {len(my_seq_reader)} frames")
+                inst_name_map = my_seq_reader.get_inst_name_map() # from inst map to object
                 first_seen_dict = {}
                 annotated_frame_per_inst = {}
-                vos_idx_cls_map = {} # key: VOS idx; value: semantic
+                vos_obj_cnt = 0
                 my_vos.reset_engine()
                 tp_cnt = 0
                 fp_cnt = 0
                 tn_cnt = 0
                 fn_cnt = 0
-                for i in range(len(my_seq_reader)):
+                save_base_dir = f"/data/ICRA2023/gaps_vos_prob_map/{canonical_obj_name}/{scene_name}"
+                os.makedirs(save_base_dir, exist_ok=True)
+                for i in trange(len(my_seq_reader)):
                     data_dict = my_seq_reader[i]
                     img = data_dict['color']
-                    mask = data_dict['semantic_label']
                     if True:
-                        mask[mask == 21] = 20
+                        path = os.path.join(save_base_dir, f"{str(i).zfill(6)}_rgb.jpg")
+                        Image.fromarray(img).save(path)
+                    mask = data_dict['semantic_label']
                     inst_map = data_dict['inst_label']
                     img_chw = torch.tensor(img).float().permute((2, 0, 1))
                     img_chw = img_chw / 255 # norm to 0-1
                     img_chw = self.normalizer(img_chw)
                     img_bchw = img_chw.view((1,) + img_chw.shape)
-                    start_cp = time.time()
-                    pred_map = self.infer_one(img_bchw).cpu().numpy()[0]
-                    combined_pred_map = pred_map.copy()
-                    # Overwrite pred_map with VOS
+                    # only 1 batch
+                    pred_prob_map = self.infer_one(img_bchw, ret_prob_map=True)[0]
+                    pred_map = pred_prob_map.max(dim = 0)[1].cpu().numpy()
+                    # VOS prediction
                     if my_vos.frame_cnt != 0:
-                        vos_pred_map = np.zeros_like(pred_map)
-                        pred_label = my_vos.propagate_one_frame(img)
-                        for vos_idx in vos_idx_cls_map:
-                            vos_pred_map[pred_label == vos_idx] = vos_idx_cls_map[vos_idx]
-                        combined_pred_map[vos_pred_map > 0] = vos_pred_map[vos_pred_map > 0]
-                    inference_latency = time.time() - start_cp
-                    online_inference_latency_dict[scene_name].append(inference_latency)
+                        vos_pred_map = my_vos.propagate_one_frame(img)
+                        vos_pred_map[vos_pred_map > 0] = 1 # instance-level -> binary
+                        if True:
+                            path = os.path.join(save_base_dir, f"{str(i).zfill(6)}_vos.png")
+                            Image.fromarray(vos_pred_map.astype(np.uint8)).save(path)
                     if canonical_obj_name in self.class_names:
                         interest_cls_idx = self.class_names.index(canonical_obj_name)
                         # Seen this object before, eval
-                        metrics_dict = utils.compute_binary_metrics(vos_pred_map, mask, class_idx=interest_cls_idx)
+                        metrics_dict = utils.compute_binary_metrics((pred_map == interest_cls_idx).astype(np.uint8), mask)
                         tp_cnt += metrics_dict['tp']
                         fp_cnt += metrics_dict['fp']
                         tn_cnt += metrics_dict['tn']
                         fn_cnt += metrics_dict['fn']
-                        cv2.imshow('cur_label', (mask==interest_cls_idx).astype(np.uint8) * 255)
-                        cv2.imshow('gaps_pred', (pred_map==interest_cls_idx).astype(np.uint8) * 255)
-                        cv2.imshow('vos_pred', (vos_pred_map==interest_cls_idx).astype(np.uint8) * 255)
-                    # label_vis = utils.visualize_segmentation(self.cfg, img_chw, pred_map, self.class_names)
-                    # cv2.imshow('pred', cv2.cvtColor(label_vis, cv2.COLOR_RGB2BGR))
-                    if cv2.waitKey(1) & 0xFF == ord('q'):
-                        break
+                        if True:
+                            pred_prob_map_to_save = torch.softmax(pred_prob_map, dim=0).cpu().numpy()[-1] * 65535
+                            pred_prob_map_to_save = pred_prob_map_to_save.astype(np.uint16)
+                            path = os.path.join(save_base_dir, f"{str(i).zfill(6)}_raw_prob.png")
+                            Image.fromarray(pred_prob_map_to_save).save(path)
+                            gaps_pred = (pred_map==interest_cls_idx).astype(np.uint8) * 255
+                            path = os.path.join(save_base_dir, f"{str(i).zfill(6)}_gaps_pred.png")
+                            Image.fromarray(gaps_pred).save(path)
+                            path = os.path.join(save_base_dir, f"{str(i).zfill(6)}_gt.png")
+                            Image.fromarray(((mask == interest_cls_idx) * 255).astype(np.uint8)).save(path)
                     if generalization_test:
                         continue
-                    if mask.max() >= self.cfg.num_classes: # more than base classes
+                    if mask.max() > 0: # Specified object is in view
                         unique_inst_list = np.unique(inst_map)
                         for inst in unique_inst_list:
                             if inst == 0: continue # background
@@ -151,38 +154,39 @@ class live_continual_seg_trainer(seg_trainer):
                                 else:
                                     # Reaction
                                     # Every time it is spotted, it needs to stay for at least 30 frames
-                                    if i < first_seen_dict[inst] + 30:
+                                    if i < first_seen_dict[inst] + annotation_frame_idx:
                                         continue
-                                    # print("First seen pass")
                                     # Maximum 3 annotations per instance
                                     if inst in annotated_frame_per_inst and len(annotated_frame_per_inst[inst]) >= 5:
                                         continue
-                                    # print("Max anno check pass")
                                     # At least 300 frames between adjacent annotations
                                     if inst in annotated_frame_per_inst and i < annotated_frame_per_inst[inst][-1] + 300:
                                         continue
-                                    # print("Adjacent check pass")
                                     # IoU
                                     if canonical_obj_name in self.class_names:
-                                        if metrics_dict['iou'] > 0.7:
-                                            continue
-                                    # print("IoU check pass")
+                                        try:
+                                            if metrics_dict['iou'] > 0.7:
+                                                print("IoU check failed!")
+                                                continue
+                                        except UnboundLocalError:
+                                            pass # not define yet
                                     # Pixel count
                                     pixel_cnt = np.sum(inst_map == inst)
                                     if pixel_cnt < minimum_instance_size:
                                         continue
-                                    # print("Pixel count pass")
                                     # Boundary
                                     no_boundary_cnt = np.sum(inst_map[1:-1,1:-1] == inst)
                                     if no_boundary_cnt != pixel_cnt:
                                         # pixel locates at boundary
                                         continue
-                                    # print("Boundary check pass")
                                     # All criterion passed; now we can provide annotation
                                     # select relevant instance
                                     instance_mask = (inst_map == inst).astype(np.uint8)
                                     # Simulate user inputs. RITM segmeter 
                                     provided_mask, num_click = my_ritm_segmenter.auto_eval(img, instance_mask, max_clicks=max_clicks, iou_thresh=iou_thresh)
+                                    if True:
+                                        path = os.path.join(save_base_dir, f"{str(i).zfill(6)}_provided.npy")
+                                        np.save(path, provided_mask)
                                     print("Spent {} clicks".format(num_click))
                                     num_clicks_spent[scene_name] += num_click
                                     provided_mask = torch.tensor(provided_mask).int()
@@ -195,22 +199,18 @@ class live_continual_seg_trainer(seg_trainer):
                                         annotated_frame_per_inst[inst].append(i)
 
                                     # New VOS idx
-                                    vos_inst_idx = len(vos_idx_cls_map) + 1
+                                    vos_inst_idx = vos_obj_cnt + 1
+                                    vos_obj_cnt += 1
                                     vos_label[vos_label == 1] = vos_inst_idx
-                                    vos_idx_cls_map[vos_inst_idx] = self.class_names.index(canonical_obj_name)
-                                    assert self.class_names.index(canonical_obj_name) in mask
                                     my_vos.add_reference_frame(img, vos_label.cpu().numpy())
                 if num_clicks_spent[scene_name] == 0:
                     print("No annotation provided for {}".format(scene_name))
                 print("Object IoU: {:.4f}".format(tp_cnt / (tp_cnt + fp_cnt + fn_cnt + 1e-10)))
                 print("Recall: {:.4f}".format(tp_cnt / (tp_cnt + fn_cnt + 1e-10)))
                 print("Precision: {:.4f}".format(tp_cnt / (tp_cnt + fp_cnt + 1e-10)))
-                print("Avg latency: {:.4f} w/ std: {:.4f}".format(
-                    np.mean(online_inference_latency_dict[scene_name]), np.std(online_inference_latency_dict[scene_name])))
                 print("Main inference completed. Waiting for processes {} to finish".format(self.process_pool.keys()))
                 for process_name in self.process_pool:
                     self.process_pool[process_name].join()
-                # embed(header='at the end')
         print("Total clicks expanded: {}".format(num_clicks_spent))
         print(f"Total delay violation: {delay_violation_cnt}")
         print("eval on old dataset to test catastrophic forgetting")
@@ -218,45 +218,7 @@ class live_continual_seg_trainer(seg_trainer):
         print("Base IoU after adaptation")
         print(np.mean(class_iou[:-1]))
     
-    def live_run(self, device):
-        self.infer_on_video()
-        print("Main inference completed. Waiting for processes {} to finish".format(self.process_pool.keys()))
-        for process_name in self.process_pool:
-            self.process_pool[process_name].join()
-    
-    def infer_on_video(self):
-        self.backbone_net.eval()
-        self.post_processor.eval()
-        video_path = 'corkscrew_01_clutter_1.mp4'
-        cap = cv2.VideoCapture(video_path)
-        out = cv2.VideoWriter('output.mp4',cv2.VideoWriter_fourcc(*'mp4v'), 30.0, (640,360))
-        cnt = 0
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret: break
-            cv2.imshow('raw', frame)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
-            rgb_np = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            img_chw = torch.tensor(rgb_np).float().permute((2, 0, 1))
-            img_chw = img_chw / 255 # norm to 0-1
-            img_chw = self.normalizer(img_chw)
-            img_bchw = img_chw.view((1,) + img_chw.shape)
-            start_cp = time.time()
-            pred_map = self.infer_one(img_bchw).cpu().numpy()[0]
-            print(f"infer time: {time.time() - start_cp}")
-            label_vis = utils.visualize_segmentation(self.cfg, img_chw, pred_map, self.class_names)
-            cv2.imshow('label', cv2.cvtColor(label_vis, cv2.COLOR_RGB2BGR))
-            out.write(cv2.cvtColor(label_vis, cv2.COLOR_RGB2BGR))
-            if cnt == 40:
-                mask = Image.open('corkscrew_01_clutter_1_frame_40.png')
-                mask = np.array(mask)
-                mask = torch.tensor(mask).int()
-                self.novel_adapt_single(img_chw, mask, 'corkscrew')
-            cnt += 1
-        out.release()
-    
-    def infer_one(self, img_bchw):
+    def infer_one(self, img_bchw, ret_prob_map=False):
         self.model_lock.acquire()
         self.backbone_net.eval()
         self.post_processor.eval()
@@ -266,8 +228,10 @@ class live_continual_seg_trainer(seg_trainer):
             feature = self.backbone_net(data)
             ori_spatial_res = data.shape[-2:]
             output = self.post_processor(feature, ori_spatial_res)
+            self.model_lock.release()
+            if ret_prob_map:
+                return output
             pred_map = output.max(dim = 1)[1]
-        self.model_lock.release()
         return pred_map
     
     def novel_adapt_single(self, img_chw, mask_hw, obj_name, blocking=True):
