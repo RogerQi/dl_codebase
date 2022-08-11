@@ -1,13 +1,17 @@
+from operator import gt
+from torch import logical_or
 import __init_lib_path
 from config_guard import cfg, update_config_from_yaml
 import dataset
 import backbone
 import classifier
+from vision_hub.interactive_seg.ritm import ritm_segmenter
 import loss
 import trainer
 import utils
 import vision_hub
 from dataset.scannet_seq_reader import scannet_scene_reader
+import cv2
 
 import time
 import argparse
@@ -21,9 +25,12 @@ import torchvision as tv
 import os
 import json
 import zipfile
+import pickle
+from tqdm import trange, tqdm
+from scipy.stats import hmean
 
 EVAL_SCENE_NAME = ['scene0050_00', 'scene0565_00', 'scene0462_00', 'scene0144_00', 'scene0593_00']
-SCANNET_PATH = "/media/eason/My Passport/data/scannet_v2"
+SCANNET_PATH = "/home/randomgraph/yichen14/dl_codebase/data/scannet_v2"
 
 def parse_args():
     parser = argparse.ArgumentParser(description = "Continual learning benchmark")
@@ -39,94 +46,382 @@ def parse_args():
 
     return args
 
-def parse_seg_groups(ann_json):
-    # return a dictionary
-    # key: segment idx
-    # value: object idx
-    all_inst_list = ann_json['segGroups']
-    ret_dict = {}
-    ret_obj_idx = []
-    ret_obj_names = {}
-    for inst in all_inst_list:
-        object_idx = inst['objectId'] + 1 # from 0-indexed to 1-indexed for background
-        assert object_idx > 0
-        ret_obj_idx.append(object_idx)
-        ret_obj_names[object_idx] = inst['label']
-        segment_list = inst['segments']
-        for seg in segment_list:
-            assert seg not in ret_dict
-            ret_dict[seg] = object_idx
-    return ret_dict, ret_obj_idx, ret_obj_names
-
-def get_scene_info(scene_name):
-    """ random a novel object from the "other objects" list
-    
-    Args:
-        scene_name (string): scannet scene name.
-    
-    Return: (string) canonical_obj_name: object that need annotation.
-
+def gen_annotation_interval(model, obj_scene_map):
     """
-    my_seq_reader = scannet_scene_reader("/media/eason/My Passport/data/scannet_v2", scene_name)
-
-    object_info = {}
-
-    for i in range(len(my_seq_reader)):
-        data_dict = my_seq_reader[i]
-        mask = data_dict['semantic_label']
-
-        
-
-    fine_grained_annotation_file = '{}_vh_clean.aggregation.json'
-    fine_grained_annotation_json_path = os.path.join(SCANNET_PATH, scene_name, fine_grained_annotation_file.format(scene_name))
-    with open(fine_grained_annotation_json_path) as f:
-        ann_json = json.load(f)
-    
-    segment_obj_map, obj_idx_list, obj_name_map = parse_seg_groups(ann_json)
-    pass
-
-def evaluation(model, segmenter, vos_engine=None):
-    model.prepare_for_eval()
-    normalizer = model.normalizer
-
-    online_inference_latency_dict = {}
-    precision_dict = {}    
+        generate annotation intervals that satisfy our criterions for each scene
+    """
     num_clicks_spent = {}
-    for scene in EVAL_SCENE_NAME:
-        num_clicks_spent[scene] = 0
-        seq_reader = scannet_scene_reader(SCANNET_PATH, scene)
+    interest_obj_list = sorted(list(obj_scene_map.keys()))
 
-        # Blocking offline evaluation to compute reference metrics
-        model.take_snapshot()
-        online_inference_latency_dict[scene] = []
-        for i in range(len(seq_reader)):
-            data_dict = seq_reader[i]
-            img = data_dict['color']
-            mask = data_dict['semantic_label']
-            img_chw = torch.tensor(img).float().permute((2, 0, 1))
-            img_chw = img_chw / 255 # norm to 0-1
-            img_chw = normalizer(img_chw)
-            img_bchw = img_chw.view((1,) + img_chw.shape)
+    #some constants
+    minimum_instance_size = 5000
 
-            # computer latency for single inferencing single image
-            start_cp = time.time()
-            pred_map = model.infer_one(img_bchw).cpu().numpy()[0]
-            online_inference_latency_dict[scene].append(time.time() - start_cp)
+    video_out_path = '/home/randomgraph/yichen14/dl_codebase/visualization/videos'
 
-            # label_vis = utils.visualize_segmentation(self.cfg, img_chw, pred_map, self.class_names)
-            if canonical_obj_name in model.class_names:
+    for canonical_obj_name in interest_obj_list:
+
+        adaptation_scene_list = obj_scene_map[canonical_obj_name][:-2]
+
+        for scene_name in adaptation_scene_list:
+
+            # visulization:
+            out = cv2.VideoWriter(os.path.join(video_out_path,'annotation_interval', 'annotation_interval_{}_{}.mp4'.format(canonical_obj_name, scene_name)),cv2.VideoWriter_fourcc(*'mp4v'), 30.0, (640, 480))
+
+            num_clicks_spent[scene_name] = 0
+            my_seq_reader = scannet_scene_reader(SCANNET_PATH, scene_name)
+            inst_name_map = my_seq_reader.get_inst_name_map()
+            first_seen_dict = {} # record first seen frame of each instance
+            annotated_frame_per_inst = {}
+
+            for i in trange(len(my_seq_reader)):
+                data_dict = my_seq_reader[i]
+                img = data_dict['color']
+                mask = data_dict['semantic_label']
+                inst_map = data_dict['inst_label']
+
+                if mask.max() >= model.cfg.num_classes:
+
+                    unique_inst_list = np.unique(inst_map)
+                    for inst in unique_inst_list:
+                        if inst == 0: continue # background
+                        if inst_name_map[inst] == canonical_obj_name:
+
+                            if inst not in first_seen_dict:
+                                first_seen_dict[inst] = i
+                            else:
+                                # check criterion
+                                if i < first_seen_dict[inst] + 30:
+                                    continue
+                                
+                                pixel_cnt = np.sum(inst_map == inst)
+                                if pixel_cnt < minimum_instance_size:
+                                    continue
+
+                                no_boundary_cnt = np.sum(inst_map[1:-1,1:-1] == inst)
+                                if no_boundary_cnt != pixel_cnt:
+                                    # pixel locates at boundary
+                                    continue
+
+                                img_chw = torch.tensor(img).float().permute((2, 0, 1))
+                                img_chw = img_chw / 255 # norm to 0-1
+                                img_chw = model.normalizer(img_chw)
+                                gt_mask = np.zeros_like(mask)
+                                for inst in unique_inst_list:
+                                    if inst == 0: continue
+                                    if inst_name_map[inst] == canonical_obj_name:
+                                        instance_mask = (inst_map == inst).astype(np.uint8)
+                                        gt_mask = np.logical_or(gt_mask, instance_mask).astype(np.uint8)
+
+                                label_vis = utils.visualize_segmentation(model.cfg, img_chw, gt_mask, model.class_names)
+                                frame = cv2.cvtColor(label_vis, cv2.COLOR_RGB2BGR)
+                                frame = cv2.putText(frame, str(i), (4, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA)
+                                out.write(frame)
+                                if inst not in annotated_frame_per_inst:
+                                    annotated_frame_per_inst[inst] = [i]
+                                else:
+                                    annotated_frame_per_inst[inst].append(i)
+                                
+            out.release()
+            for process_name in model.process_pool:
+                model.process_pool[process_name].join()
+
+def evaluation(model, segmenter, obj_scene_map):
+    num_clicks_spent = {}
+    online_inference_latency_dict = {}
+    interest_obj_list = sorted(list(obj_scene_map.keys()))
+    
+    scores = {} # scores for each object
+
+    #some constants
+    minimum_instance_size = 5000
+    max_clicks = 20
+    iou_thresh = 0.85
+    delay_violation_cnt = 0
+
+    model.take_snapshot()
+
+    video_out_path = '/home/randomgraph/yichen14/dl_codebase/visualization/videos'
+
+    for canonical_obj_name in ['computer tower']:
+        print("------------------------------------------------")
+        model.restore_last_snapshot()
+
+        print("now eval on {}, it contains {} scenes, use last two scenes for generalization test".format(canonical_obj_name, len(obj_scene_map[canonical_obj_name])))
+
+        # set last two sequences as generalization test seqs
+        adaptation_scene_list = obj_scene_map[canonical_obj_name][:-2]
+        generalization_scene_list = obj_scene_map[canonical_obj_name][-2:]
+
+        scores[canonical_obj_name] = {}
+
+        # adaptation score
+        print("------------------------------------------------")
+        print("Calculating short-term adaptation score...")
+        model.prepare_for_eval()
+        c = 0
+        for scene_name in adaptation_scene_list:
+
+            # visulization:
+            out_inf = cv2.VideoWriter(os.path.join(video_out_path, 'adaptation_inf_{}_{}.mp4'.format(canonical_obj_name, scene_name)),cv2.VideoWriter_fourcc(*'mp4v'), 30.0, (640, 480))
+            out_gt = cv2.VideoWriter(os.path.join(video_out_path, 'adaptation_gt_{}_{}.mp4'.format(canonical_obj_name, scene_name)),cv2.VideoWriter_fourcc(*'mp4v'), 30.0, (640, 480))
+            out = cv2.VideoWriter(os.path.join(video_out_path,'annotation_interval', 'annotation_interval_{}_{}.mp4'.format(canonical_obj_name, scene_name)),cv2.VideoWriter_fourcc(*'mp4v'), 30.0, (640, 480))
+
+            # model.prepare_for_eval()
+            c+=1
+            print("Evaluate on {}, {}/{} of adaptation seq".format(scene_name, c, len(adaptation_scene_list)))
+            print(model.class_names)
+            scores[canonical_obj_name]["adaptation"] = {}
+            scores[canonical_obj_name]["generalization"] = {}
+
+            adapt_ious = []
+            adapt_latency = []
+            adapt_clicks = []
+
+            num_clicks_spent[scene_name] = 0
+            my_seq_reader = scannet_scene_reader(SCANNET_PATH, scene_name)
+            inst_name_map = my_seq_reader.get_inst_name_map()
+            online_inference_latency_dict[scene_name] = []
+            first_seen_dict = {} # record first seen frame of each instance
+            annotated_frame_per_inst = {}
+            
+            tp_cnt, fp_cnt, tn_cnt, fn_cnt = 0, 0, 0, 0
+
+            for i in trange(len(my_seq_reader)):
+                data_dict = my_seq_reader[i]
+                img = data_dict['color']
+                mask = data_dict['semantic_label']
+                inst_map = data_dict['inst_label']
+
+                start_cp = time.time()
+                combined_pred_map, vos_pred_map = model.infer_one_aot(img)
+                online_inference_latency_dict[scene_name].append(time.time() - start_cp)
+
+                if canonical_obj_name in model.class_names:
+                    unique_inst_list = np.unique(inst_map)
+                    gt_mask = np.zeros_like(vos_pred_map)
+                    for inst in unique_inst_list:
+                        if inst == 0: continue
+                        if inst_name_map[inst] == canonical_obj_name:
+                            instance_mask = (inst_map == inst).astype(np.uint8)
+                            gt_mask = np.logical_or(gt_mask, instance_mask).astype(np.uint8)
+
+                    interest_cls_idx = model.class_names.index(canonical_obj_name)
+                    gt_mask[gt_mask>0] = interest_cls_idx
+
+                    # Seen this object before, eval
+                    metrics_dict = utils.compute_binary_metrics(vos_pred_map, gt_mask, class_idx=interest_cls_idx)
+                    tp_cnt += metrics_dict['tp']
+                    fp_cnt += metrics_dict['fp']
+                    tn_cnt += metrics_dict['tn']
+                    fn_cnt += metrics_dict['fn']
+
+                    # visualize frame for debug purpose
+                    img_chw = torch.tensor(img).float().permute((2, 0, 1))
+                    img_chw = img_chw / 255 # norm to 0-1
+                    img_chw = model.normalizer(img_chw)
+                    label_vis = utils.visualize_segmentation(model.cfg, img_chw, vos_pred_map, model.class_names)
+                    frame = cv2.cvtColor(label_vis, cv2.COLOR_RGB2BGR)
+                    frame = cv2.putText(frame, str(i), (4, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA)
+                    cv2.imwrite("/home/randomgraph/yichen14/dl_codebase/visualization/adaptation_inference.jpg", frame)
+                    out_inf.write(frame)
+
+                    label_vis = utils.visualize_segmentation(model.cfg, img_chw, gt_mask, model.class_names)
+                    frame = cv2.cvtColor(label_vis, cv2.COLOR_RGB2BGR)
+                    frame = cv2.putText(frame, str(i), (4, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA)
+                    cv2.imwrite("/home/randomgraph/yichen14/dl_codebase/visualization/adaptation_gt.jpg", frame)
+                    out_gt.write(frame)
+
+                if mask.max() >= model.cfg.num_classes:
+
+                    unique_inst_list = np.unique(inst_map)
+                    for inst in unique_inst_list:
+                        if inst == 0: continue # background
+                        if inst_name_map[inst] == canonical_obj_name:
+
+                            if inst not in first_seen_dict:
+                                first_seen_dict[inst] = i
+                            else:
+                                # check criterion
+                                if i < first_seen_dict[inst] + 30:
+                                    continue
+
+                                if inst in annotated_frame_per_inst and len(annotated_frame_per_inst[inst]) >= 5:
+                                    continue
+
+                                if inst in annotated_frame_per_inst and i < annotated_frame_per_inst[inst][-1] + 300:
+                                    continue
+
+                                if canonical_obj_name in model.class_names:
+                                    if metrics_dict['iou'] > 0.7:
+                                        continue
+                                
+                                pixel_cnt = np.sum(inst_map == inst)
+                                if pixel_cnt < minimum_instance_size:
+                                    continue
+
+                                no_boundary_cnt = np.sum(inst_map[1:-1,1:-1] == inst)
+                                if no_boundary_cnt != pixel_cnt:
+                                    # pixel locates at boundary
+                                    continue
+
+                                # All criterion passed; now we can provide annotation
+                                # select relevant instance
+
+                                print("Found the novel object that satisfy all criterions, object instance index: {}".format(inst))
+                                instance_mask = (inst_map == inst).astype(np.uint8)
+                                provided_mask, num_click = segmenter.auto_eval(img, instance_mask, max_clicks=max_clicks, iou_thresh=iou_thresh)
+                                print("Spent {} clicks".format(num_click))
+                                num_clicks_spent[scene_name] += num_click
+
+                                provided_mask = torch.tensor(provided_mask).int()
+                                model.novel_adapt_single_w_aot(img, provided_mask, canonical_obj_name, blocking=False)
+
+                                # visualization for manually pick annotation frame
+                                # img_chw = torch.tensor(img).float().permute((2, 0, 1))
+                                # img_chw = img_chw / 255 # norm to 0-1
+                                # img_chw = model.normalizer(img_chw)
+                                # gt_mask = np.zeros_like(mask)
+                                # for inst in unique_inst_list:
+                                #     if inst == 0: continue
+                                #     if inst_name_map[inst] == canonical_obj_name:
+                                #         instance_mask = (inst_map == inst).astype(np.uint8)
+                                #         gt_mask = np.logical_or(gt_mask, instance_mask).astype(np.uint8)
+
+                                # label_vis = utils.visualize_segmentation(model.cfg, img_chw, gt_mask, model.class_names)
+                                # frame = cv2.cvtColor(label_vis, cv2.COLOR_RGB2BGR)
+                                # frame = cv2.putText(frame, str(i), (4, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA)
+                                # out.write(frame)
+
+
+                                # record annotated frame for this instance
+                                if inst not in annotated_frame_per_inst:
+                                    annotated_frame_per_inst[inst] = [i]
+                                else:
+                                    annotated_frame_per_inst[inst].append(i)
+                                
+                                img_chw = torch.tensor(img).float().permute((2, 0, 1))
+                                img_chw = img_chw / 255 # norm to 0-1
+                                img_chw = model.normalizer(img_chw)
+                                label_vis = utils.visualize_segmentation(model.cfg, img_chw, provided_mask, model.class_names)
+                                frame = cv2.cvtColor(label_vis, cv2.COLOR_RGB2BGR)
+                                cv2.imwrite("/home/randomgraph/yichen14/dl_codebase/visualization/annotations/annotation_frame_{}_{}.jpg".format(scene_name, i), frame)
+
+            out_gt.release()
+            out_inf.release()
+            out.release()
+            if num_clicks_spent[scene_name] == 0:
+                print("No annotation provided for {}".format(scene_name))
+            print("============================")
+            print(scene_name)
+            print("| Object IoU: {:.4f}".format(tp_cnt / (tp_cnt + fp_cnt + fn_cnt + 1e-10)))
+            print("| Avg latency: {:.4f} w/ std: {:.4f}".format(
+                np.mean(online_inference_latency_dict[scene_name]), np.std(online_inference_latency_dict[scene_name])))
+            print("============================")
+            # print("Main inference completed. Waiting for processes {} to finish".format(model.process_pool.keys()))
+
+            adapt_ious.append(tp_cnt / (tp_cnt + fp_cnt + fn_cnt + 1e-10))
+            adapt_latency.append(np.mean(online_inference_latency_dict[scene_name]))
+            adapt_clicks.append(num_clicks_spent[scene_name])
+
+            for process_name in model.process_pool:
+                model.process_pool[process_name].join()
+            
+
+        scores[canonical_obj_name]["adaptation"]["IoU"] = hmean(adapt_ious)
+        scores[canonical_obj_name]["adaptation"]["latency"] = np.mean(adapt_latency)
+        scores[canonical_obj_name]["adaptation"]["clicks"] = np.mean(adapt_clicks)
+
+        print("------------------------------------------------")
+        print("Calculating generalization score...")
+        model.prepare_for_eval()
+        for scene_name in generalization_scene_list:
+
+            # visulization:
+            out_inf = cv2.VideoWriter(os.path.join(video_out_path, 'general_inf_{}_{}.mp4'.format(canonical_obj_name, scene_name)),cv2.VideoWriter_fourcc(*'mp4v'), 30.0, (640, 480))
+            # out_gt = cv2.VideoWriter(os.path.join(video_out_path, 'general_gt_{}_{}.mp4'.format(canonical_obj_name, scene_name)),cv2.VideoWriter_fourcc(*'mp4v'), 30.0, (640, 480))
+
+            # model.prepare_for_eval()
+            print("Evaluate on {}".format(scene_name))
+            num_clicks_spent[scene_name] = 0
+            my_seq_reader = scannet_scene_reader(SCANNET_PATH, scene_name)
+            inst_name_map = my_seq_reader.get_inst_name_map()
+            online_inference_latency_dict[scene_name] = []
+            annotated_frame_per_inst = {}
+
+            general_ious = []
+            general_latency = []
+
+            tp_cnt, fp_cnt, tn_cnt, fn_cnt = 0, 0, 0, 0
+
+            for i in trange(len(my_seq_reader)):
+                data_dict = my_seq_reader[i]
+                img = data_dict['color']
+                mask = data_dict['semantic_label']
+                inst_map = data_dict['inst_label']
+
+                start_cp = time.time()
+                combined_pred_map, _ = model.infer_one_aot(img)
+                online_inference_latency_dict[scene_name].append(time.time() - start_cp)
+
+                unique_inst_list = np.unique(inst_map)
+                # gt_mask = np.zeros_like(combined_pred_map)
+                # for inst in unique_inst_list:
+                #     if inst == 0: continue
+                #     if inst_name_map[inst] == canonical_obj_name:
+                #         instance_mask = (inst_map == inst).astype(np.uint8)
+                #         gt_mask = np.logical_or(gt_mask, instance_mask).astype(np.uint8)
+
+                interest_cls_idx = model.class_names.index(canonical_obj_name)
+                # gt_mask[gt_mask>0] = interest_cls_idx
+
                 # Seen this object before, eval
-                intersection, union = utils.compute_iu(pred_map, mask, num_classes=22, fg_only=True)
-                if online_intersection is None:
-                    online_intersection = intersection
-                    online_union = union
-                else:
-                    online_intersection += intersection
-                    online_union += union
+                metrics_dict = utils.compute_binary_metrics(combined_pred_map, mask, class_idx=interest_cls_idx)
+                tp_cnt += metrics_dict['tp']
+                fp_cnt += metrics_dict['fp']
+                tn_cnt += metrics_dict['tn']
+                fn_cnt += metrics_dict['fn']
 
+                # visualize frame for debug purpose
+                img_chw = torch.tensor(img).float().permute((2, 0, 1))
+                img_chw = img_chw / 255 # norm to 0-1
+                img_chw = model.normalizer(img_chw)
+                label_vis = utils.visualize_segmentation(model.cfg, img_chw, combined_pred_map, model.class_names)
+                frame = cv2.cvtColor(label_vis, cv2.COLOR_RGB2BGR)
+                cv2.imwrite("/home/randomgraph/yichen14/dl_codebase/visualization/general_inference.jpg", frame)
+                out_inf.write(frame)
+                
+                # label_vis = utils.visualize_segmentation(model.cfg, img_chw, mask, model.class_names)
+                # frame = cv2.cvtColor(label_vis, cv2.COLOR_RGB2BGR)
+                # cv2.imwrite("/home/randomgraph/yichen14/dl_codebase/visualization/general_gt.jpg", frame)
+                # out_gt.write(frame)
 
+            # out_gt.release()
+            out_inf.release()
+            print("============================")
+            print(scene_name)
+            print("| Object IoU: {:.4f}".format(tp_cnt / (tp_cnt + fp_cnt + fn_cnt + 1e-10)))
+            print("| Avg latency: {:.4f} w/ std: {:.4f}".format(
+                    np.mean(online_inference_latency_dict[scene_name]), np.std(online_inference_latency_dict[scene_name])))
+            print("============================")
+            general_ious.append(tp_cnt / (tp_cnt + fp_cnt + fn_cnt + 1e-10))
+            general_latency.append(np.mean(online_inference_latency_dict[scene_name]))
+        
+        scores[canonical_obj_name]["generalization"]["IoU"] = hmean(general_ious)
+        scores[canonical_obj_name]["generalization"]["latency"] = np.mean(general_latency)
 
-    pass
+        scores[canonical_obj_name]["IoU Score"] = hmean(scores[canonical_obj_name]["generalization"]["IoU"], scores[canonical_obj_name]["adaptation"]["IoU"])
+
+        print("Total clicks expanded: {}".format(num_clicks_spent))
+        print(f"Total delay violation: {delay_violation_cnt}")
+        print("eval on old dataset to test catastrophic forgetting")
+        class_iou, pixel_acc = model.eval_on_loader(model.val_loader, 22)
+        print("Base IoU after adaptation")
+        print(np.mean(class_iou[:-1]))
+
+        print(scores[canonical_obj_name]["IoU Score"])
+
+    print(scores)
+
 
 def get_trainer(cfg, device, model_path):
     dataset_module = dataset.dataset_dispatcher(cfg)
@@ -155,6 +450,7 @@ def main():
     # |  2. Set device
     # |  3. Set seed
     # --------------------------
+    # os.chdir("/home/randomgraph/yichen14/dl_codebase")
     args = parse_args()
     update_config_from_yaml(cfg, args)
     device = utils.guess_device()
@@ -168,7 +464,9 @@ def main():
     # set up model (for now is the trainer)
     my_trainer = get_trainer(cfg, device, args.load)
     
-    evaluation(model=my_trainer, segmenter=my_ritm_segmenter, vos_engine=my_vos_engine)
+    with open('/home/randomgraph/yichen14/dl_codebase/metadata/scannet_map.pkl', 'rb') as f:
+        obj_scene_map = pickle.load(f)
+        evaluation(model=my_trainer, segmenter=my_ritm_segmenter, obj_scene_map=obj_scene_map)
 
 if __name__ == '__main__':
     main()

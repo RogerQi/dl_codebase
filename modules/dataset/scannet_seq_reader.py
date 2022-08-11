@@ -7,12 +7,12 @@ import imageio
 import cv2
 import csv
 import shutil
-
-from tqdm import tqdm
+import json
+import pickle
 
 import zipfile
 
-root_dir = "/media/eason/My Passport/data/scannet_v2"
+root_dir = "/home/randomgraph/yichen14/dl_codebase/data/scannet_v2/"
 
 label_file = os.path.join(root_dir, 'scannetv2-labels.combined.tsv')
 
@@ -28,31 +28,39 @@ def unzip(zip_path, zip_type):
 
 scannet_id_nyu_dict = {}
 
+with open('/home/randomgraph/yichen14/dl_codebase/metadata/scannet_map.pkl', 'rb') as f:
+    obj_scene_map = pickle.load(f)
+interest_obj_list = sorted(list(obj_scene_map.keys()))
+
+# map label as instructed in http://kaldir.vc.in.tum.de/scannet_benchmark/labelids.txt
+VALID_CLASS_IDS = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 24, 28, 33, 34, 36, 39])
+
+scannet_subset_map = np.zeros(41) - 1 # NYU40 has 40 labels
+for i in range(len(VALID_CLASS_IDS)):
+    scannet_subset_map[VALID_CLASS_IDS[i]] = i
+
 with open(label_file, newline='') as csvfile:
     reader = csv.DictReader(csvfile, delimiter='\t')
     for row_dict in reader:
         scannet_id = row_dict['id']
         nyu40_id = row_dict['nyu40id']
+        category_name = row_dict['category']
         scannet_id_nyu_dict[int(scannet_id)] = int(nyu40_id)
-
-# map label as instructed in http://kaldir.vc.in.tum.de/scannet_benchmark/labelids.txt
-VALID_CLASS_IDS = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 24, 28, 33, 34, 36, 39])
-
-scannet_subset_map = np.zeros(41) # NYU40 has 40 labels
-for i in range(len(VALID_CLASS_IDS)):
-    scannet_subset_map[VALID_CLASS_IDS[i]] = i + 1
 
 # This dict maps from fine-grained ScanNet ids (579 categories)
 # to the 20 class subset as in the benchmark
-scannet_mapping = np.zeros(max(scannet_id_nyu_dict) + 1)
+scannet_mapping = np.zeros(max(scannet_id_nyu_dict) + 1) - 1
 
 for k in scannet_id_nyu_dict:
     scannet_mapping[k] = scannet_subset_map[scannet_id_nyu_dict[k]]
 
-# HARDCODE FOR NOW
-printer_scannet_id = 50
-
-scannet_mapping[printer_scannet_id] = len(VALID_CLASS_IDS) + 1
+with open(label_file, newline='') as csvfile:
+    reader = csv.DictReader(csvfile, delimiter='\t')
+    for row_dict in reader:
+        scannet_id = row_dict['id']
+        category_name = row_dict['category']
+        if category_name in interest_obj_list:
+            scannet_mapping[int(scannet_id)] = len(VALID_CLASS_IDS) + interest_obj_list.index(category_name)
 
 COMPRESSION_TYPE_COLOR = {-1:'unknown', 0:'raw', 1:'png', 2:'jpeg'}
 COMPRESSION_TYPE_DEPTH = {-1:'unknown', 0:'raw_ushort', 1:'zlib_ushort', 2:'occi_ushort'}
@@ -93,13 +101,20 @@ class scannet_scene_reader:
         sens_path = os.path.join(root_dir, 'scans', scene_name, f'{scene_name}.sens')
         semantic_zip_path = os.path.join(root_dir, 'scans', scene_name, f'{scene_name}_2d-label-filt.zip')
         instance_zip_path = os.path.join(root_dir, 'scans', scene_name, f'{scene_name}_2d-instance-filt.zip')
+
+        self.segm_json_path = os.path.join(root_dir, 'scans', scene_name, f'{scene_name}_vh_clean.aggregation.json')
         
         # Load
-        self.load(sens_path)
+        self._load(sens_path)
         self.label_dir = unzip(semantic_zip_path, 'label-filt')
         self.inst_dir = unzip(instance_zip_path, 'instance-filt')
+    
+    def get_inst_name_map(self):
+        with open(self.segm_json_path) as f:
+            ann_json = json.load(f)
+        return self.parse_seg_groups(ann_json)
 
-    def load(self, filename):
+    def _load(self, filename):
         with open(filename, 'rb') as f:
             # Read meta data
             version = struct.unpack('I', f.read(4))[0]
@@ -121,7 +136,7 @@ class scannet_scene_reader:
             
             # Read frames
             self.frames = []
-            for i in tqdm(range(num_frames)):
+            for i in range(num_frames):
                 frame = RGBDFrame()
                 frame.load(f)
                 self.frames.append(frame)
@@ -165,3 +180,15 @@ class scannet_scene_reader:
     def __len__(self):
         return len(self.frames)
 
+    @staticmethod
+    def parse_seg_groups(ann_json):
+        # return a dictionary
+        # key: inst idx
+        # value: object name
+        all_inst_list = ann_json['segGroups']
+        ret_obj_names = {}
+        for inst in all_inst_list:
+            object_idx = inst['objectId'] + 1 # from 0-indexed to 1-indexed for background
+            assert object_idx > 0
+            ret_obj_names[object_idx] = inst['label']
+        return ret_obj_names

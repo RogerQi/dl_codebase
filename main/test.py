@@ -66,7 +66,7 @@ def main():
 
     trainer_func = trainer.dispatcher(cfg)
     my_trainer = trainer_func(cfg, backbone_net, post_processor, criterion, dataset_module, device)
-    os.chdir("/home/eason/code_base/dl_codebase/")
+    os.chdir("/home/randomgraph/yichen14/dl_codebase/")
     print("Initializing backbone with trained weights from: {}".format(args.load))
     my_trainer.load_model(args.load)
 

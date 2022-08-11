@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from IPython import embed
 
 IGNORE_LABEL = -1
+eps=1e-10
 
 def get_valid_mask(gt_arr, fg_only, masked_class):
     valid_mask = (gt_arr != IGNORE_LABEL)
@@ -42,9 +43,12 @@ def compute_pixel_acc(pred, label, fg_only=True, masked_class=None):
     acc = float(correct_sum) / (valid_sum + 1e-10)
     return acc, valid_sum
 
-def compute_binary_metrics(pred, label, eps=1e-10):
-    pred = pred.astype(np.uint8)
-    label = label.astype(np.uint8)
+def compute_binary_metrics(pred, label, class_idx=1, fg_only=False, masked_class=None):
+    valid_mask = get_valid_mask(label, fg_only, masked_class)
+    pred = (pred == class_idx).astype(np.uint8)
+    label = (label == class_idx).astype(np.uint8)
+    pred = pred[valid_mask]
+    label = label[valid_mask]
     tp = np.sum(np.logical_and(pred == 1, label == 1))
     tn = np.sum(np.logical_and(pred == 0, label == 0))
     fp = np.sum(np.logical_and(pred == 1, label == 0))
@@ -61,7 +65,7 @@ def compute_binary_metrics(pred, label, eps=1e-10):
         'precision': tp / (tp + fp + eps)
     }
 
-def compute_iou(pred_map, label_map, num_classes, fg_only=False, ignore_mask=True, masked_class=None):
+def compute_iou(pred_map, label_map, num_classes, fg_only=False, masked_class=None):
     """
     Param
         - ignore_mask: set to True if there are targets to be ignored. Pixels whose value equal to 255
@@ -72,10 +76,9 @@ def compute_iou(pred_map, label_map, num_classes, fg_only=False, ignore_mask=Tru
 
     assert pred_map.shape == label_map.shape
 
-    if ignore_mask:
-        valid_idx = get_valid_mask(label_map, fg_only, masked_class)
-        pred_map = pred_map[valid_idx]
-        label_map = label_map[valid_idx]
+    valid_idx = get_valid_mask(label_map, fg_only, masked_class)
+    pred_map = pred_map[valid_idx]
+    label_map = label_map[valid_idx]
 
     # When computing intersection, all pixels that are not
     # in the intersection are masked with zeros.
@@ -99,7 +102,7 @@ def compute_iou(pred_map, label_map, num_classes, fg_only=False, ignore_mask=Tru
     else:
         return np.sum(area_intersection) / np.sum(area_union)
 
-def compute_iu(pred_map, label_map, num_classes, fg_only=False, ignore_mask=True, masked_class=None):
+def compute_iu(pred_map, label_map, num_classes, fg_only=False, masked_class=None):
     """
     Param
         - ignore_mask: set to True if there are targets to be ignored. Pixels whose value equal to 255
@@ -110,10 +113,9 @@ def compute_iu(pred_map, label_map, num_classes, fg_only=False, ignore_mask=True
 
     assert pred_map.shape == label_map.shape
 
-    if ignore_mask:
-        valid_idx = get_valid_mask(label_map, fg_only, masked_class)
-        pred_map = pred_map[valid_idx]
-        label_map = label_map[valid_idx]
+    valid_idx = get_valid_mask(label_map, fg_only, masked_class)
+    pred_map = pred_map[valid_idx]
+    label_map = label_map[valid_idx]
 
     # When computing intersection, all pixels that are not
     # in the intersection are masked with zeros.

@@ -73,6 +73,6 @@ class trainer_base(object):
         Args:
             file_path (str): path to trained weights
         """
-        trained_weight_dict = torch.load(file_path, map_location=self.device)
+        trained_weight_dict = torch.load(file_path)
         self.backbone_net.load_state_dict(trained_weight_dict['backbone'], strict=True)
         self.post_processor.load_state_dict(trained_weight_dict['head'], strict=True)

@@ -13,13 +13,13 @@ import torch.nn.functional as F
 import torchvision as tv
 import torchvision.transforms.functional as tr_F
 from tqdm import tqdm, trange
+import pickle
 from backbone.deeplabv3_renorm import BatchRenorm2d
 
 import utils
 import vision_hub
 
 from .seg_trainer import seg_trainer
-from .fs_incremental_trainer import fs_incremental_trainer
 from IPython import embed
 import threading
 
@@ -49,6 +49,8 @@ class live_continual_seg_trainer(seg_trainer):
 
         self.novel_idx = 20
 
+        self.vos_idx_cls_map = {}
+
         # Network must either be in training/eval state
         self.model_lock = threading.Lock()
     
@@ -71,161 +73,214 @@ class live_continual_seg_trainer(seg_trainer):
         self.class_names = self.snapshot_dict['class_names']
         self.psuedo_database = self.snapshot_dict['psuedo_database']
         self.cls_name_id_map = self.snapshot_dict['img_name_id_map']
+        self.my_aot_segmenter.reset_engine()
         self.model_lock.release()
     
     def test_one(self, device):
+
+        # set our model to evaluation mode
         self.backbone_net.eval()
         self.post_processor.eval()
-        num_clicks_spent = {}
+
+        # set up our vos and ritm segmenter models
         my_ritm_segmenter = vision_hub.interactive_seg.ritm_segmenter()
+        my_vos = vision_hub.vos.aot_segmenter()
+
+        # set some constants
         max_clicks = 20
         iou_thresh = 0.85 # for clicking
-        annotation_frame_idx = 20
-        offline_inference_latency_dict = {}
+        annotation_frame_idx = 30
+        minimum_instance_size = 2000
+        delay_violation_cnt = 0
+
+        # initailize dictionaries for data recording
+        num_clicks_spent = {}
         online_inference_latency_dict = {}
         precision_dict = {}
-        delay_violation_cnt = 0
-        for scene_name in ['scene0050_00', 'scene0565_00', 'scene0462_00', 'scene0144_00', 'scene0593_00']:
-            num_clicks_spent[scene_name] = 0
-            canonical_obj_name = 'printer'
-            my_seq_reader = scannet_scene_reader("/media/eason/My Passport/data/scannet_v2", scene_name)
-            found_novel_obj = False
-            # Blocking offline evaluation to compute reference metrics
-            # self.take_snapshot()
-            # offline_inference_latency_dict[scene_name] = []
-            # offline_intersection = None
-            # offline_union = None
-            # first_seen_frame = None
-            # for i in range(len(my_seq_reader)):
-            #     data_dict = my_seq_reader[i]
-            #     img = data_dict['color']
-            #     mask = data_dict['semantic_label']
-            #     img_chw = torch.tensor(img).float().permute((2, 0, 1))
-            #     img_chw = img_chw / 255 # norm to 0-1
-            #     img_chw = self.normalizer(img_chw)
-            #     img_bchw = img_chw.view((1,) + img_chw.shape)
-            #     start_cp = time.time()
-            #     pred_map = self.infer_one(img_bchw).cpu().numpy()[0]
-            #     offline_inference_latency_dict[scene_name].append(time.time() - start_cp)
-            #     label_vis = utils.visualize_segmentation(self.cfg, img_chw, pred_map, self.class_names)
-            #     if canonical_obj_name in self.class_names:
-            #         # Seen this object before, eval
-            #         intersection, union = utils.compute_iu(pred_map, mask, num_classes=22, fg_only=True)
-            #         if offline_intersection is None:
-            #             offline_intersection = intersection
-            #             offline_union = union
-            #         else:
-            #             offline_intersection += intersection
-            #             offline_union += union
-            #     # cv2.imshow('label', cv2.cvtColor(label_vis, cv2.COLOR_RGB2BGR))
-            #     # if cv2.waitKey(1) & 0xFF == ord('q'):
-            #     #     break
-            #     if 21 in mask and first_seen_frame is None:
-            #         first_seen_frame = i
-            #     if first_seen_frame is not None and i == first_seen_frame + 30 and scene_name != 'scene0593_00':
-            #         assert 21 in mask
-            #         assert np.sum(mask == 21) > 2000 # only objects large enough will be considered
-            #         # select relevant instance
-            #         inst_idx_list, inst_pixel_cnt = np.unique(data_dict['inst_label'][data_dict['semantic_label'] == 21], return_counts=True)
-            #         selected_instance = inst_idx_list[np.argmax(inst_pixel_cnt)]
-            #         instance_mask = (data_dict['inst_label'] == selected_instance).astype(np.uint8)
-            #         # Simulate user inputs. RITM segmeter 
-            #         provided_mask, num_click = my_ritm_segmenter.auto_eval(img, instance_mask, max_clicks=max_clicks, iou_thresh=iou_thresh)
-            #         provided_mask = torch.tensor(provided_mask).int()
-            #         self.novel_adapt_single(img_chw, provided_mask, canonical_obj_name, blocking=True)
-            # print("[OFFLINE] Avg IoU: {:.4f}".format(np.mean(offline_intersection[-1] / (offline_union[-1] + 1e-10))))
-            # print("[OFFLINE] Avg latency: {:.4f} w/ std: {:.4f}".format(
-            #     np.mean(offline_inference_latency_dict[scene_name]),
-            #     np.std(offline_inference_latency_dict[scene_name])))
-            # # Non-blocking online evaluation
-            # self.restore_last_snapshot()
-            online_inference_latency_dict[scene_name] = []
-            online_intersection = None
-            online_union = None
-            first_seen_frame = None
-            for i in range(len(my_seq_reader)):
-                data_dict = my_seq_reader[i]
-                img = data_dict['color']
-                mask = data_dict['semantic_label']
-                img_chw = torch.tensor(img).float().permute((2, 0, 1))
-                img_chw = img_chw / 255 # norm to 0-1
-                img_chw = self.normalizer(img_chw)
-                img_bchw = img_chw.view((1,) + img_chw.shape)
-                start_cp = time.time()
-                pred_map = self.infer_one(img_bchw).cpu().numpy()[0]
-                inference_latency = time.time() - start_cp
-                online_inference_latency_dict[scene_name].append(inference_latency)
+        
+        # get cananical objects map
+        os.chdir('/home/randomgraph/yichen14/dl_codebase')
+        with open('metadata/scannet_map.pkl', 'rb') as f:
+            obj_scene_map = pickle.load(f)
+        interest_obj_list = sorted(list(obj_scene_map.keys()))
 
-                # Overwrite pred_map with VOS
-                if found_novel_obj: # if found novel obj, start short-term online eval with VOS method.
-                    # read_fn = f'/home/roger/reproduction/aot-benchmark/demo_output/pred_masks/{scene_name}/frame-{str(i).zfill(6)}.png'
-                    # if os.path.exists(read_fn):
-                    #     vos_pred = np.array(Image.open(read_fn)).astype(np.uint8)
-                    #     vos_pred = cv2.resize(vos_pred, (640, 480), interpolation=cv2.INTER_NEAREST)
-                    #     pred_map[vos_pred == 1] = 21
-                    pred_map = self.infer_w_aot(pred_map, img)
+        # do evaluation on each object
+        for canonical_obj_name in interest_obj_list:
+            for scene_name in obj_scene_map[canonical_obj_name]: # iterate each scene
 
-                label_vis = utils.visualize_segmentation(self.cfg, img_chw, pred_map, self.class_names)
-                if canonical_obj_name in self.class_names:
-                    # Seen this object before, eval
-                    intersection, union = utils.compute_iu(pred_map, mask, num_classes=22, fg_only=True)
-                    if online_intersection is None:
-                        online_intersection = intersection
-                        online_union = union
-                    else:
-                        online_intersection += intersection
-                        online_union += union
-                cv2.imshow('label', cv2.cvtColor(label_vis, cv2.COLOR_RGB2BGR))
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
-                if 21 in mask and first_seen_frame is None:
-                    first_seen_frame = i
-                if first_seen_frame is not None and i == first_seen_frame + 30 and scene_name != 'scene0593_00':
-                    assert 21 in mask
-                    assert np.sum(mask == 21) > 2000 # only objects large enough will be considered
-                    # select relevant instance
-                    inst_idx_list, inst_pixel_cnt = np.unique(data_dict['inst_label'][data_dict['semantic_label'] == 21], return_counts=True)
-                    selected_instance = inst_idx_list[np.argmax(inst_pixel_cnt)]
-                    instance_mask = (data_dict['inst_label'] == selected_instance).astype(np.uint8)
-                    # Simulate user inputs. RITM segmeter 
-                    provided_mask, num_click = my_ritm_segmenter.auto_eval(img, instance_mask, max_clicks=max_clicks, iou_thresh=iou_thresh)
-                    num_clicks_spent[scene_name] += num_click
-                    provided_mask = torch.tensor(provided_mask).long()
+                print("now eval on {}".format(scene_name))
+                if scene_name in obj_scene_map[canonical_obj_name][-2:]: # if last two scene, general test
+                    generalization_test = True
+                else:
+                    generalization_test = False
+                
+                num_clicks_spent[scene_name] = 0 # initialize clicks spent in this scene
+                
+                # get seq reader in order to iterate each frame
+                my_seq_reader = scannet_scene_reader("/home/randomgraph/yichen14/dl_codebase/data/scannet_v2", scene_name)
 
-                    # set aot segmenter reference frame.
-                    found_novel_obj = True
-                    self.my_aot_segmenter.reset_engine()
-                    label = deepcopy(provided_mask)
-                    # label[label == 1] = 21
-                    self.my_aot_segmenter.add_reference_frame(img, label.cpu().numpy())
+                inst_name_map = my_seq_reader.get_inst_name_map() # get instance map
+
+                # initialize dictionaries
+                online_inference_latency_dict[scene_name] = []
+                first_seen_dict = {}
+                annotated_frame_per_inst = {}
+                vos_idx_cls_map = {} # key: VOS idx; value: semantic
+
+                my_vos.reset_engine()
+
+                # for metric calculation
+                tp_cnt = 0
+                fp_cnt = 0
+                tn_cnt = 0
+                fn_cnt = 0
+                 
+                # process each frame
+                for i in range(len(my_seq_reader)):
+                    data_dict = my_seq_reader[i]
+                    img = data_dict['color'] # get RGB img
+                    mask = data_dict['semantic_label'] # get ground truth semantic mask
+                    if True:
+                        mask[mask == 21] = 20 # ? need more explaination on this line
+
+                    inst_map = data_dict['inst_label'] # get ground truth instance map
+
+                    # DO INFERENCE
+
+                    # img transform
+                    img_chw = torch.tensor(img).float().permute((2, 0, 1))
+                    img_chw = img_chw / 255 # norm to 0-1
+                    img_chw = self.normalizer(img_chw)
+                    img_bchw = img_chw.view((1,) + img_chw.shape)
+
+                    start_cp = time.time() # inference start time
+
+                    pred_map = self.infer_one(img_bchw).cpu().numpy()[0]
+                    combined_pred_map = pred_map.copy()
+
+                    # Overwrite pred_map with VOS
+                    if my_vos.frame_cnt != 0:
+                        # if on training process
+                        vos_pred_map = np.zeros_like(pred_map)
+                        pred_label = my_vos.propagate_one_frame(img) # get vos prediction 
+
+                        for vos_idx in vos_idx_cls_map:
+                            vos_pred_map[pred_label == vos_idx] = vos_idx_cls_map[vos_idx] # change pred index to self.class_names index
+                        
+                        # combined inference map with vos pred map
+                        combined_pred_map[vos_pred_map > 0] = vos_pred_map[vos_pred_map > 0] # where should we use combined_pred_map?
                     
-                    self.novel_adapt_single(img_chw, provided_mask, canonical_obj_name, blocking=False)
-            print("[ONLINE] Avg IoU: {:.4f}".format(np.mean(online_intersection[-1] / (online_union[-1] + 1e-10))))
-            print("[ONLINE] Avg latency: {:.4f} w/ std: {:.4f}".format(
-                np.mean(online_inference_latency_dict[scene_name]), np.std(online_inference_latency_dict[scene_name])))
-            print("Main inference completed. Waiting for processes {} to finish".format(self.process_pool.keys()))
-            for process_name in self.process_pool:
-                self.process_pool[process_name].join()
-            # Add VOS tracked examples to data pool
-            # if scene_name != 'scene0593_00':
-            #     valid_mask_dir = os.path.join('/home/roger/dl_codebase/june17_temp', scene_name)
-            #     all_masks = os.listdir(valid_mask_dir)
-            #     for mask_fn in all_masks:
-            #         mask_idx = int(mask_fn.split('-')[1].split('.')[0])
-            #         mask_path = os.path.join(valid_mask_dir, mask_fn)
-            #         vos_mask = torch.tensor(np.array(Image.open(mask_path)).astype(np.uint8))
-            #         data_dict = my_seq_reader[mask_idx]
-            #         img = data_dict['color']
-            #         img_chw = torch.tensor(img).float().permute((2, 0, 1))
-            #         img_chw = img_chw / 255 # norm to 0-1
-            #         img_chw = self.normalizer(img_chw)
-            #         img_roi, mask_roi = utils.crop_partial_img(img_chw, vos_mask)
-            #         # FIXME: figure out why this happens?
-            #         if img_roi.shape[1] == 0 or img_roi.shape[2] == 0:
-            #             continue
-            #         self.psuedo_database['printer'].append((img_chw, vos_mask, img_roi, mask_roi))
-            #     print("Adapting to VOS samples")
-            #     self.finetune_backbone_one('printer')
+                    # compute latency and put it in the latency dict
+                    inference_latency = time.time() - start_cp
+                    online_inference_latency_dict[scene_name].append(inference_latency)
+                    
+                    # Seen this object before, eval on this object only
+                    if canonical_obj_name in self.class_names:
+                        interest_cls_idx = self.class_names.index(canonical_obj_name)
+                        metrics_dict = utils.compute_binary_metrics(vos_pred_map, mask, class_idx=interest_cls_idx)
+                        tp_cnt += metrics_dict['tp']
+                        fp_cnt += metrics_dict['fp']
+                        tn_cnt += metrics_dict['tn']
+                        fn_cnt += metrics_dict['fn']
+
+                        # doesn't have GUI ignore visualization
+
+                        # cv2.imshow('cur_label', (mask==interest_cls_idx).astype(np.uint8) * 255)
+                        # cv2.imshow('gaps_pred', (pred_map==interest_cls_idx).astype(np.uint8) * 255)
+                        # cv2.imshow('vos_pred', (vos_pred_map==interest_cls_idx).astype(np.uint8) * 255)
+                    # label_vis = utils.visualize_segmentation(self.cfg, img_chw, pred_map, self.class_names)
+                    # cv2.imshow('pred', cv2.cvtColor(label_vis, cv2.COLOR_RGB2BGR))
+                    # if cv2.waitKey(1) & 0xFF == ord('q'):
+                    #     break
+
+                    if generalization_test: 
+                        # if this scene is for generalization test, we do not need perform annotation simulation and fintune stage
+                        continue
+
+                    # provide annotation and start fine tune if we see a novel object that satisfy our requirement
+                    if mask.max() >= self.cfg.num_classes: # if this frame contains novel objects
+
+                        unique_inst_list = np.unique(inst_map) # get ground truth instance index list for this scene
+
+                        # iterate each instances to find canonical object
+                        for inst in unique_inst_list:
+                            if inst == 0: continue # background, pass
+                            if inst_name_map[inst] == canonical_obj_name:
+
+                                if inst not in first_seen_dict: # if see this object first time
+                                    first_seen_dict[inst] = i # record the first seen frame
+                                else: 
+                                    # check each criterions
+
+                                    # 1. Every time it is spotted, it needs to stay for at least 30 frames
+                                    if i < first_seen_dict[inst] + 30:
+                                        continue
+                                    
+                                    # 2. Maximum 3 annotations per instance
+                                    if inst in annotated_frame_per_inst and len(annotated_frame_per_inst[inst]) >= 5:
+                                        continue
+
+                                    # 3. At least 300 frames between adjacent annotations
+                                    if inst in annotated_frame_per_inst and i < annotated_frame_per_inst[inst][-1] + 300:
+                                        continue
+
+                                    # 4. IoU need to be less than 0.7
+                                    if canonical_obj_name in self.class_names:
+                                        if metrics_dict['iou'] > 0.7:
+                                            continue
+
+                                    # 5. Pixel count
+                                    pixel_cnt = np.sum(inst_map == inst)
+                                    if pixel_cnt < minimum_instance_size:
+                                        continue
+
+                                    # 6. Boundary
+                                    no_boundary_cnt = np.sum(inst_map[1:-1,1:-1] == inst)
+                                    if no_boundary_cnt != pixel_cnt:
+                                        # pixel locates at boundary
+                                        continue
+
+                                    # All criterion passed; now we can provide annotation
+
+                                    # select relevant instance
+                                    instance_mask = (inst_map == inst).astype(np.uint8)
+
+                                    # Simulate user inputs using RITM segmeter 
+                                    provided_mask, num_click = my_ritm_segmenter.auto_eval(img, instance_mask, max_clicks=max_clicks, iou_thresh=iou_thresh)
+                                    print("Spent {} clicks".format(num_click))
+
+                                    num_clicks_spent[scene_name] += num_click # record num of click in this scene
+
+                                    # start training
+                                    provided_mask = torch.tensor(provided_mask).int()
+                                    self.novel_adapt_single(img_chw, provided_mask, canonical_obj_name, blocking=False)
+                                    vos_label = provided_mask.long()
+
+                                    # record annotated frame for this instance
+                                    if inst not in annotated_frame_per_inst:
+                                        annotated_frame_per_inst[inst] = [i]
+                                    else:
+                                        annotated_frame_per_inst[inst].append(i)
+
+                                    # Get New VOS idx  and add VOS reference frame
+                                    vos_inst_idx = len(vos_idx_cls_map) + 1
+                                    vos_label[vos_label == 1] = vos_inst_idx
+                                    vos_idx_cls_map[vos_inst_idx] = self.class_names.index(canonical_obj_name)
+                                    assert self.class_names.index(canonical_obj_name) in mask
+                                    my_vos.add_reference_frame(img, vos_label.cpu().numpy())
+
+                # print result for this scene                    
+                if num_clicks_spent[scene_name] == 0:
+                    print("No annotation provided for {}".format(scene_name))
+                print("Object IoU: {:.4f}".format(tp_cnt / (tp_cnt + fp_cnt + fn_cnt + 1e-10)))
+                print("Recall: {:.4f}".format(tp_cnt / (tp_cnt + fn_cnt + 1e-10)))
+                print("Precision: {:.4f}".format(tp_cnt / (tp_cnt + fp_cnt + 1e-10)))
+                print("Avg latency: {:.4f} w/ std: {:.4f}".format(
+                    np.mean(online_inference_latency_dict[scene_name]), np.std(online_inference_latency_dict[scene_name])))
+                print("Main inference completed. Waiting for processes {} to finish".format(self.process_pool.keys()))
+                for process_name in self.process_pool:
+                    self.process_pool[process_name].join()
+                
         print("Total clicks expanded: {}".format(num_clicks_spent))
         print(f"Total delay violation: {delay_violation_cnt}")
         print("eval on old dataset to test catastrophic forgetting")
@@ -314,13 +369,36 @@ class live_continual_seg_trainer(seg_trainer):
             output = self.post_processor(feature, ori_spatial_res)
             pred_map = output.max(dim = 1)[1]
         pred_map = pred_map.cpu().numpy()[0]
+        combined_pred_map = pred_map.copy()
+        
         if self.my_aot_segmenter.frame_cnt > 0:
             # print("infer result with VOS-AOTB assistance")
+            vos_pred_map = np.zeros_like(pred_map)
             pred_label = self.my_aot_segmenter.propagate_one_frame(img)
-            pred_map[pred_map == self.novel_idx] = 0
-            pred_map[pred_label == 1] = self.novel_idx
+            for vos_idx in self.vos_idx_cls_map:
+                vos_pred_map[pred_label == vos_idx] = self.vos_idx_cls_map[vos_idx]
+            # pred_map[pred_map == self.novel_idx] = 0
+            # pred_map[pred_label == 1] = self.novel_idx
+            combined_pred_map[vos_pred_map > 0] = vos_pred_map[vos_pred_map > 0]
+            pred_map = vos_pred_map
         self.model_lock.release()
-        return pred_map
+        return combined_pred_map, pred_map
+    
+    def novel_adapt_single_w_aot(self, img, mask_hw, obj_name, blocking=True):
+
+        img_chw = torch.tensor(img).float().permute((2, 0, 1))
+        img_chw = img_chw / 255 # norm to 0-1
+        img_chw = self.normalizer(img_chw)
+        self.novel_adapt_single(img_chw, mask_hw, obj_name, blocking)     
+
+        # self.my_aot_segmenter.reset_engine()
+        vos_label = mask_hw.long()
+        vos_inst_idx = len(self.vos_idx_cls_map) + 1
+        vos_label[vos_label == 1] = vos_inst_idx
+        self.vos_idx_cls_map[vos_inst_idx] = self.class_names.index(obj_name)
+        print("class names: ",self.class_names)
+        print("vos_idx_cls_map:", self.vos_idx_cls_map)
+        self.my_aot_segmenter.add_reference_frame(img, vos_label.cpu().numpy())
     
     def novel_adapt_single(self, img_chw, mask_hw, obj_name, blocking=True):
         """Adapt to a single image
@@ -473,7 +551,7 @@ class live_continual_seg_trainer(seg_trainer):
                 partial_positive_idx = torch.tensor(partial_positive_idx)
                 fully_labeled_flag = torch.tensor(fully_labeled_flag)
                 data_bchw = torch.stack(image_list).to(self.device).detach()
-                target_bhw = torch.stack(mask_list).to(self.device).detach()
+                target_bhw = torch.stack(mask_list).to(self.device).detach().long()
                 self.model_lock.acquire()
                 self.backbone_net.train()
                 self.post_processor.train()
@@ -494,7 +572,7 @@ class live_continual_seg_trainer(seg_trainer):
                     # loss = self.criterion(output[fully_labeled_flag], target_bhw[fully_labeled_flag])
 
                     # Partially annotated image propagation using MiB loss
-                    # FIXME: check if there is bug
+                    # TODO: check if there is bug
                     if len(partial_positive_idx) > 0:
                         partial_labeled_flag = torch.logical_not(fully_labeled_flag)
                         output_logit_bchw = F.softmax(output[partial_labeled_flag], dim=1)
@@ -528,8 +606,11 @@ class live_continual_seg_trainer(seg_trainer):
                 scheduler.step()
                 self.model_lock.release()
                 t.set_description_str("Loss: {:.4f}".format(loss.item()))
+        # self.my_aot_segmenter.reset_engine()
         
     def prepare_for_eval(self):
+        self.vos_idx_cls_map = {}
+        self.my_aot_segmenter.reset_engine()
         self.backbone_net.eval()
         self.post_processor.eval()
         

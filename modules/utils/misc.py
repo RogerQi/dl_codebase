@@ -11,7 +11,7 @@ def get_dataset_root():
     try:
         return os.environ['DATASET_ROOT']
     except KeyError:
-        return "/media/eason/My Passport/data/"
+        return "/home/randomgraph/yichen14/dl_codebase/data/"
 
 def guess_device():
     if torch.cuda.is_available():
