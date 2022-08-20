@@ -1,0 +1,6 @@
+name: 'GIFS_pascal5i_voc_split3'
+BASE_YAML: './voc2012_5i_fs_base.yaml'
+
+DATASET:
+  PASCAL5i:
+    folding: 3
