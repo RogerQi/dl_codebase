@@ -215,7 +215,7 @@ from .baseset import base_set
 
 
 def get_dataset_list(mode, overlap=True):
-    all_dataset = open(f"modules/SSUL_datasets/data/voc/{mode}_cls.txt",
+    all_dataset = open(f"modules/dataset/data/voc/{mode}_cls.txt",
                        "r").read().splitlines()
 
     # target_cls = get_tasks('voc', task, step)
