@@ -282,8 +282,8 @@ def load_seg_mask(file_path):
 
 
 def create_pascal_voc_aug(root):
-    # voc_base = os.path.join(root, 'VOCdevkit', 'VOC2012')
-    voc_base = os.path.join(root, 'PascalVOC12')
+    voc_base = os.path.join(root, 'VOCdevkit', 'VOC2012')
+    # voc_base = os.path.join(root, 'PascalVOC12')
 
     # Define path to relevant txt files
     # voc_train_list_path = os.path.join(
