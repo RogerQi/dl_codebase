@@ -71,7 +71,7 @@ TASK_SPECIFIC:
     context_aware_sampling_prob: 0.9
     baseset_type: 'uniform_interval'
     probabilistic_synthesis_strat: 'vRFS'
-    num_runs: 10
+    num_runs: 2
 
 # PIFS
 # TASK_SPECIFIC:
