@@ -60,7 +60,7 @@ TASK_SPECIFIC:
   GIFS:
     fine_tuning: True
     pseudo_base_label: False
-    max_iter: 10
+    max_iter: 200
 #    num_shots: 1
     num_shots: 5
     ft_batch_size: 5
@@ -71,7 +71,7 @@ TASK_SPECIFIC:
     context_aware_sampling_prob: 0.9
     baseset_type: 'uniform_interval'
     probabilistic_synthesis_strat: 'vRFS'
-    num_runs: 2
+    num_runs: 10
 
 # PIFS
 # TASK_SPECIFIC:
