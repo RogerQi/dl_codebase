@@ -22,6 +22,9 @@ class GIFS_seg_trainer(seg_trainer):
 
         self.continual_test_loader = torch.utils.data.DataLoader(self.continual_test_set, batch_size=cfg.TEST.batch_size, shuffle=False, **self.loader_kwargs)
 
+        self.test_base_iou = []
+        self.test_novel_iou = []
+
     # self.train_one is inherited from seg trainer
     # self.val_one is inherited from seg trainer
 
@@ -94,16 +97,32 @@ class GIFS_seg_trainer(seg_trainer):
             base_iou = np.mean(base_iou_list)
             novel_iou = np.mean(novel_iou_list)
             print("Base IoU: {:.4f} Novel IoU: {:.4f} Total IoU: {:.4f}".format(base_iou, novel_iou, np.mean(classwise_iou)))
-            run_base_iou_list.append(base_iou)
-            run_novel_iou_list.append(novel_iou)
-            run_total_iou_list.append(np.mean(classwise_iou))
-            run_harm_iou_list.append(harmonic_mean(base_iou, novel_iou))
-        print("Results of {} runs with {} shots".format(num_runs, num_shots))
-        print("Base IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_base_iou_list), np.std(run_base_iou_list)))
-        print("Novel IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_novel_iou_list), np.std(run_novel_iou_list)))
-        print("Harmonic IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_harm_iou_list), np.std(run_harm_iou_list)))
-        print("Total IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_total_iou_list), np.std(run_total_iou_list)))
-    
+            # run_base_iou_list.append(base_iou)
+            # run_novel_iou_list.append(novel_iou)
+            # run_total_iou_list.append(np.mean(classwise_iou))
+            # run_harm_iou_list.append(harmonic_mean(base_iou, novel_iou))
+        # print("Results of {} runs with {} shots".format(num_runs, num_shots))
+        # print("Base IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_base_iou_list), np.std(run_base_iou_list)))
+        # print("Novel IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_novel_iou_list), np.std(run_novel_iou_list)))
+        # print("Harmonic IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_harm_iou_list), np.std(run_harm_iou_list)))
+        # print("Total IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_total_iou_list), np.std(run_total_iou_list)))
+        print("test base iou: ")
+        print(self.test_base_iou)
+        print("test novel iou: ")
+        print(self.test_novel_iou)
+        total_mean_iou = np.add(self.test_base_iou, self.test_novel_iou) / 2
+        max_mean_iou_index = np.where(total_mean_iou == np.amax(total_mean_iou))[0][0]
+
+        print("Results of {} runs in a non-few-shot setting".format(num_runs))
+        # print("max Base IoU: {:.4f} max Novel IoU: {:.4f}".format(np.max(self.test_base_iou), np.max(self.test_novel_iou)))
+        print("max Base IoU: {:.4f} max Novel IoU: {:.4f}".format(
+            self.test_base_iou[max_mean_iou_index],
+            self.test_novel_iou[max_mean_iou_index]))
+
+        print("mean Base IoU: {:.4f} mean Novel IoU: {:.4f}".format(np.mean(self.test_base_iou),
+                                                                    np.mean(self.test_novel_iou)))
+
+
     def classifier_weight_imprinting(self, base_id_list: List[int], novel_id_list: List[int], support_set: dict):
         """Use masked average pooling to initialize a new 1x1 convolutional HEAD for semantic segmentation
 

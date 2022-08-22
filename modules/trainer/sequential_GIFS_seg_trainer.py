@@ -89,6 +89,32 @@ class sequential_GIFS_seg_trainer(GIFS_seg_trainer):
             base_class_idx += task
             base_class_idx = sorted(base_class_idx)
 
+        ###############################################################
+        classwise_iou, mean_pixel_acc = self.eval_on_loader(self.continual_test_loader,
+                                                            num_classes=21,
+                                                            masked_class=None)
+
+        learned_novel_class_idx = sorted(list(range(16, 21)))
+
+        base_class_idx = self.train_set.dataset.visible_labels
+        if 0 not in base_class_idx:
+            base_class_idx.append(0)
+        base_class_idx = sorted(base_class_idx)
+
+        novel_iou_list = []
+        base_iou_list = []
+        for i in range(len(classwise_iou)):
+            label = i
+            if label in learned_novel_class_idx:
+                novel_iou_list.append(classwise_iou[i])
+            elif label in base_class_idx:
+                base_iou_list.append(classwise_iou[i])
+            else:
+                continue
+        self.test_base_iou.append(np.mean(base_iou_list))
+        self.test_novel_iou.append(np.mean(novel_iou_list))
+    ###############################################################
+
         # Restore weights
         self.backbone_net = self.vanilla_backbone_net
         self.post_processor = self.vanilla_post_processor
