@@ -61,8 +61,8 @@ TASK_SPECIFIC:
     fine_tuning: True
     pseudo_base_label: False
     max_iter: 200
-    num_shots: 1
-#    num_shots: 5
+#    num_shots: 1
+    num_shots: 5
     ft_batch_size: 5
     backbone_lr: 1e-3
     classifier_lr: 1e-2
