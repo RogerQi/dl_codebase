@@ -60,7 +60,7 @@ TASK_SPECIFIC:
   GIFS:
     fine_tuning: True
     pseudo_base_label: False
-    max_iter: 200
+    max_iter: 10
 #    num_shots: 1
     num_shots: 5
     ft_batch_size: 5
