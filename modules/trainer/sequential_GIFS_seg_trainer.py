@@ -94,7 +94,8 @@ class sequential_GIFS_seg_trainer(GIFS_seg_trainer):
                                                             num_classes=21,
                                                             masked_class=None)
 
-        learned_novel_class_idx = sorted(list(range(16, 21)))
+        # learned_novel_class_idx = sorted(list(range(16, 21)))
+        learned_novel_class_idx = sorted(list(range(11, 16)))
 
         base_class_idx = self.train_set.dataset.visible_labels
         if 0 not in base_class_idx:
