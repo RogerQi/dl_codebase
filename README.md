@@ -1,4 +1,4 @@
-# Roger's Deep Learning Tools of the Trade
+# Extendible continual few-shot segmentation framework
 
 This codebase should be as generic as possible. Implementation of fancy ideas should be built
 in fork of this repo rather than working in the repo itself to allow rapid development.
