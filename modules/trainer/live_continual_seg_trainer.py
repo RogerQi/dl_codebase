@@ -142,11 +142,11 @@ class live_continual_seg_trainer(seg_trainer):
                         vos_pred_map[vos_pred_map > 0] = 1 # instance-level -> binary
                         if np.sum(vos_pred_map) == 0:
                             vos_goodview_flag = False
-                        if vos_goodview_flag and my_vos.frame_cnt % 50 == 0:
+                        if vos_goodview_flag:
                             tmp_dict = utils.compute_binary_metrics(vos_pred_map.astype(np.uint8), mask)
                             automatic_iou_list.append(tmp_dict['iou'])
                             automatic_precision_list.append(tmp_dict['precision'])
-                            self.novel_adapt_single(img_chw, torch.tensor(vos_pred_map).int(), canonical_obj_name, scene_name + 'vos', i)
+                            self.novel_adapt_single(img_chw, torch.tensor(mask).int(), canonical_obj_name, scene_name + 'vos', i)
                         if save_to_disk_flag:
                             path = os.path.join(save_base_dir, f"{str(i).zfill(6)}_vos.png")
                             Image.fromarray(vos_pred_map.astype(np.uint8)).save(path)
@@ -313,6 +313,8 @@ class live_continual_seg_trainer(seg_trainer):
         print("Class-wise Novel IoU")
         print(interest_obj_list)
         print(inter[self.cfg.num_classes:] / (union[self.cfg.num_classes:] + 1e-10))
+        for k in self.psuedo_database:
+            print(f"Class {k} has {len(self.psuedo_database[k])} samples")
         self.kill_switch = True
     
     def infer_one(self, img_bchw, ret_prob_map=False):
@@ -336,6 +338,7 @@ class live_continual_seg_trainer(seg_trainer):
         """
         self.fine_tune_busy_flag = False
         self.learned_data_map = {}
+        self.training_count = 0
         while True:
             time.sleep(0.1)
             if self.kill_switch:
@@ -347,9 +350,11 @@ class live_continual_seg_trainer(seg_trainer):
                     self.fine_tune_busy_flag = True
                     self.learned_data_map[k] = deepcopy(self.psuedo_database[k])
                     self.data_lock.release()
+                    self.training_count += 1
                     self.finetune_backbone_one(k)
                     self.fine_tune_busy_flag = False
                     break
+        print(f"Total training count: {self.training_count}")
     
     def novel_adapt_single(self, img_chw, mask_hw, obj_name, scene_name, frame_idx):
         """Adapt to a single image
@@ -358,6 +363,7 @@ class live_continual_seg_trainer(seg_trainer):
             img (torch.Tensor): Normalized RGB image tensor of shape (3, H, W)
             mask (torch.Tensor): Binary mask of novel object
         """
+        assert np.sum(mask_hw) > 0
         img_roi, mask_roi = utils.crop_partial_img(img_chw, mask_hw)
         self.model_lock.acquire()
         num_existing_class = self.post_processor.pixel_classifier.class_mat.weight.data.shape[0]
