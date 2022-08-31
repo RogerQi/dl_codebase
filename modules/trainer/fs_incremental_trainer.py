@@ -238,7 +238,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
     
     def scene_model_setup(self):
         # Load torchscript
-        self.scene_model = torch.jit.load('/data/cvpr2022/vgg16_scene_net.pt')
+        self.scene_model = torch.jit.load('/root/autodl-tmp/data/cvpr2022/vgg16_scene_net.pt')
         self.scene_model = self.scene_model.to(self.device)
         # Compute feature vectors for data in the pool
         self.base_pool_cos_embeddings = []
