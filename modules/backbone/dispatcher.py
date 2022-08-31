@@ -24,5 +24,17 @@ def dispatcher(cfg):
     elif network_name == "refinenet_lw50":
         from backbone.lw_refinenet import rf_lw50
         return rf_lw50
+    elif network_name == "deeplabv3_resnet50":
+        from backbone.deeplabv3 import deeplabv3_resnet50
+        return deeplabv3_resnet50
+    elif network_name == "deeplabv3_resnet101":
+        from backbone.deeplabv3 import deeplabv3_resnet101
+        return deeplabv3_resnet101
+    elif network_name == "deeplabv3_resnet101_renorm":
+        from backbone.deeplabv3_renorm import deeplabv3_resnet101
+        return deeplabv3_resnet101
+    elif network_name == "conv4":
+        from backbone.conv4 import ConvNet
+        return ConvNet
     else:
         raise NotImplementedError

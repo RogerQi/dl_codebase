@@ -36,15 +36,12 @@ class c1(nn.Module):
         assert len(feature_shape) == 4, "Expect B*C*H*W"
         self.num_classes = num_classes
         self.prv_channels = feature_shape[1]
-        self.img_size = cfg.input_dim[-2:]
         self.conv = SameConvBNReLU(self.prv_channels, intermediate_channels_)
         self.final_conv = nn.Conv2d(intermediate_channels_, self.num_classes, 1, 1)
 
     def forward(self, x, size_=None):
         x = self.conv(x)
         x = self.final_conv(x)
-        img_size = self.img_size
-        if size_ is not None:
-            img_size = size_
-        x = F.interpolate(x, size = img_size, mode = 'bilinear', align_corners=False)
+        assert size_ is not None
+        x = F.interpolate(x, size = size_, mode = 'bilinear', align_corners=False)
         return x

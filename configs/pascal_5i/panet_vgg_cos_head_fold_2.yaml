@@ -1,12 +1,12 @@
 name: 'pascal5i_semantic_segmentation_panet_vgg16_no_bn_metatrain_fold_2'
 task: 'few_shot_semantic_segmentation_fine_tuning'
 input_dim: (3, 417, 417)
+num_classes: 16
 meta_training_num_classes: 16 # (15 annotated class in splitted training set + 1 background)
 meta_testing_num_classes: 2
 save_model: True
 
 SYSTEM:
-  use_cpu: False
   num_workers: 16
 
 BACKBONE:
@@ -17,12 +17,6 @@ BACKBONE:
 
 CLASSIFIER:
   classifier: "seg_cos"
-  SEGHEAD:
-    use_bilinear_interpolation: True
-    COSINE:
-      weight_norm: False
-      train_scale_factor: 40
-      val_scale_factor: 3
 
 LOSS:
   loss: 'semantic_nllloss'
@@ -35,7 +29,7 @@ DATASET:
   TRANSFORM:
     TRAIN:
       transforms: ('normalize', )
-      joint_transforms: ('joint_naive_resize', )
+      joint_transforms: ('joint_random_resized_crop', 'joint_random_horizontal_flip')
       TRANSFORMS_DETAILS:
         NORMALIZE:
           mean: (0.485, 0.456, 0.406)
@@ -56,7 +50,7 @@ TRAIN:
   initial_lr: 1e-3
   lr_scheduler: "step_down"
   step_down_gamma: 0.1
-  step_down_on_epoch: [15, 19]
+  step_down_on_epoch: [15]
   log_interval: 20
   OPTIMIZER:
     type: "SGD"

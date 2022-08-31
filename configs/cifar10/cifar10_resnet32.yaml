@@ -4,9 +4,6 @@ input_dim: (3, 32, 32)
 num_classes: 10
 save_model: False
 
-SYSTEM:
-  use_cpu: False
-
 BACKBONE:
   network: 'resnet32_cifar'
   pooling: True

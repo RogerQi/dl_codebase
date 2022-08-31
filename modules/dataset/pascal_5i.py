@@ -2,265 +2,168 @@
 Module containing reader to parse pascal_5i dataset from SBD and VOC2012
 """
 import os
-from PIL import Image
-from scipy.io import loadmat
 from copy import deepcopy
-import numpy as np
 import torch
 import torchvision
+
+import utils
 from .baseset import base_set
+from .voc2012_seg import PascalVOCSegReader
+
 
 class Pascal5iReader(torchvision.datasets.vision.VisionDataset):
-    """
-    pascal_5i dataset reader
+    def __init__(self, root, fold, base_stage, split, exclude_novel=False, vanilla_label=False):
+        """
+        pascal_5i dataset reader
 
-    Parameters:
-        - root:  root to data folder containing SBD and VOC2012 dataset. See README.md for details
-        - fold:  folding index as in OSLSM (https://arxiv.org/pdf/1709.03410.pdf)
-        - train: a bool flag to indicate whether L_{train} or L_{test} should be used
-    """
-
-    def __init__(self, root, fold, train=True, meta_test=False):
+        Parameters:
+            - root:  root to data folder containing SBD and VOC2012 dataset. See README.md for details
+            - fold:  folding index as in OSLSM (https://arxiv.org/pdf/1709.03410.pdf)
+            - base_stage: a bool flag to indicate whether L_{train} or L_{test} should be used
+            - split: Specify train/val split of VOC2012 dataset to read from. True indicates training
+            - exclude_novel: boolean flag to indicate whether novel examples are removed or masked.
+                There are two cases:
+                    * If set to True, examples containing pixels of novel classes are excluded.
+                        (Generalized FS seg uses this setting)
+                    * If set to False, examples containing pixels of novel classes are included.
+                        Novel pixels will be masked as background. (FS seg uses this setting)
+                When train=False (i.e., evaluating), this flag is ignored: images containing novel
+                examples are always selected.
+        """
         super(Pascal5iReader, self).__init__(root, None, None, None)
         assert fold >= 0 and fold <= 3
-        self.train = train
-        self.meta_test = meta_test
+        assert base_stage
+        if vanilla_label:
+            assert exclude_novel
+        self.vanilla_label = vanilla_label
+        self.base_stage = base_stage
 
-        # Define base to SBD and VOC2012
-        sbd_base = os.path.join(root, 'sbd')
-        voc_base = os.path.join(root, 'VOCdevkit', 'VOC2012')
-
-        # Define path to relevant txt files
-        sbd_train_list_path = os.path.join(root, 'sbd', 'train.txt')
-        sbd_val_list_path = os.path.join(root, 'sbd', 'val.txt')
-        voc_train_list_path = os.path.join(
-            voc_base, 'ImageSets', 'Segmentation', 'train.txt')
-        voc_val_list_path = os.path.join(
-            voc_base, 'ImageSets', 'Segmentation', 'val.txt')
-
-        # Use np.loadtxt to load all train/val sets
-        sbd_train_list = list(np.loadtxt(sbd_train_list_path, dtype="str"))
-        sbd_val_list = list(np.loadtxt(sbd_val_list_path, dtype="str"))
-        voc_train_list = list(np.loadtxt(voc_train_list_path, dtype="str"))
-        voc_val_list = list(np.loadtxt(voc_val_list_path, dtype="str"))
-
-        # Following PANet, we use images in SBD validation for training
-        sbd_train_list = sbd_train_list + sbd_val_list
-
-        # Remove overlapping images in SBD/VOC2012 from SBD train
-        sbd_train_list = [i for i in sbd_train_list if i not in voc_val_list]
-
-        # Generate self.images and self.targets
-        if self.train:
-            # If an image occur in both SBD and VOC2012, use VOC2012 annotation
-            sbd_train_list = [
-                i for i in sbd_train_list if i not in voc_train_list]
-
-            # Generate image/mask full paths for SBD dataset
-            sbd_train_img_list = [os.path.join(
-                sbd_base, 'img', i + '.jpg') for i in sbd_train_list]
-            sbd_train_target_list = [os.path.join(
-                sbd_base, 'cls', i + '.mat') for i in sbd_train_list]
-
-            # Generate image/mask full paths for VOC2012 segmentation training task
-            voc_train_img_list = [os.path.join(
-                voc_base, 'JPEGImages', i + '.jpg') for i in voc_train_list]
-            voc_train_target_list = [os.path.join(
-                voc_base, "SegmentationClass", i + '.png') for i in voc_train_list]
-
-            # FINAL: Merge these two datasets
-            self.images = sbd_train_img_list + voc_train_img_list
-            self.targets = sbd_train_target_list + voc_train_target_list
-        else:
-            # Generate image/mask full paths for VOC2012 semantation validation task
-            # Following PANet, only VOC2012 validation set is used for validation
-            self.images = [os.path.join(
-                voc_base, 'JPEGImages', i + '.jpg') for i in voc_val_list]
-            self.targets = [os.path.join(
-                voc_base, "SegmentationClass", i + '.png') for i in voc_val_list]
+        # Get augmented VOC dataset
+        self.vanilla_ds = PascalVOCSegReader(root, split, download=True)
+        self.CLASS_NAMES_LIST = self.vanilla_ds.CLASS_NAMES_LIST
 
         # Split dataset based on folding. Refer to https://arxiv.org/pdf/1709.03410.pdf
         # Given fold number, define L_{test}
         self.val_label_set = [i for i in range(fold * 5 + 1, fold * 5 + 6)]
         self.train_label_set = [i for i in range(
             1, 21) if i not in self.val_label_set]
-        if not self.meta_test:
-            self.label_set = self.train_label_set
+        
+        if self.base_stage:
+            self.visible_labels = self.train_label_set
+            self.invisible_labels = self.val_label_set
         else:
-            self.label_set = self.val_label_set
+            self.visible_labels = self.val_label_set
+            self.invisible_labels = self.train_label_set
+        
+        # Pre-training or meta-training
+        if exclude_novel and self.base_stage:
+            # Exclude images containing invisible classes and use rest
+            novel_examples_list = []
+            for label in self.invisible_labels:
+                novel_examples_list += self.vanilla_ds.get_class_map(label)
+            self.subset_idx = [i for i in range(len(self.vanilla_ds))]
+            self.subset_idx = list(set(self.subset_idx) - set(novel_examples_list))
+        else:
+            # Use images containing at least one pixel from relevant classes
+            examples_list = []
+            for label in self.visible_labels:
+                examples_list += self.vanilla_ds.get_class_map(label)
+            self.subset_idx = list(set(examples_list))
 
-        assert len(self.images) == len(self.targets)
-        self.to_tensor_func = torchvision.transforms.ToTensor()
+        # Sort subset idx to make dataset deterministic (because set is unordered)
+        self.subset_idx = sorted(self.subset_idx)
 
-        # Find subset of image.
-        folded_images = []
-        folded_targets = []
-
-        # Given a class, this dict returns list of images containing the class
-        self.class_img_map = {}
-        for label_id, _ in enumerate(self.label_set):
-            self.class_img_map[label_id + 1] = []
-
-        # Given an index of an image, this dict returns list of classes in the image
-        self.img_class_map = {}
-
-        for i in range(len(self.images)):
-            mask = self.load_seg_mask(self.targets[i])
-            appended_flag = False
-            # This is actually faster than hist
-            # Late night code
-            if train and not meta_test:
-                # This is the logic to test if image contains novel objects. If so, it is excluded.
-                ignore_flag = False
-                for x in self.val_label_set:
-                    if x in mask:
-                        ignore_flag = True
-                        break
-                ignore_flag = False
-                if ignore_flag:
-                    continue
-                else:
-                    for label_id, x in enumerate(self.label_set):
-                        if x in mask:
-                            if not appended_flag:
-                                # contain at least one pixel in L_{train}
-                                folded_images.append(self.images[i])
-                                folded_targets.append(self.targets[i])
-                                appended_flag = True
-                            cur_img_id = len(folded_images) - 1
-                            cur_class_id = label_id + 1
-                            # This image must be the latest appended image
-                            self.class_img_map[cur_class_id].append(cur_img_id)
-                            if cur_img_id in self.img_class_map:
-                                self.img_class_map[cur_img_id].append(cur_class_id)
-                            else:
-                                self.img_class_map[cur_img_id] = [cur_class_id]
-            else:
-                for label_id, x in enumerate(self.label_set):
-                    if x in mask:
-                        if not appended_flag:
-                            # contain at least one pixel in L_{train}
-                            folded_images.append(self.images[i])
-                            folded_targets.append(self.targets[i])
-                            appended_flag = True
-                        cur_img_id = len(folded_images) - 1
-                        cur_class_id = label_id + 1
-                        # This image must be the latest appended image
-                        self.class_img_map[cur_class_id].append(cur_img_id)
-                        if cur_img_id in self.img_class_map:
-                            self.img_class_map[cur_img_id].append(cur_class_id)
-                        else:
-                            self.img_class_map[cur_img_id] = [cur_class_id]
-
-        self.images = folded_images
-        self.targets = folded_targets
-
+        # Generate self.class_map
+        self.class_map = {}
+        for c in range(1, 21):
+            self.class_map[c] = []
+            real_class_map = self.vanilla_ds.get_class_map(c)
+            for subset_i, real_idx in enumerate(self.subset_idx):
+                if real_idx in real_class_map:
+                    self.class_map[c].append(subset_i)
+    
     def __len__(self):
-        return len(self.images)
-
-    def load_seg_mask(self, file_path):
+        return len(self.subset_idx)
+    
+    def get_class_map(self, class_id):
         """
-        Load seg_mask from file_path (supports .mat and .png).
-
-        Target masks in SBD are stored as matlab .mat; while those in VOC2012 are .png
-
-        Parameters:
-            - file_path: path to the segmenation file
-
-        Return: a numpy array of dtype long and element range(0, 21) containing segmentation mask
+        class_id here is subsetted. (e.g., class_idx is 12 in vanilla dataset may get translated to 2)
         """
-        if file_path.endswith('.mat'):
-            mat = loadmat(file_path)
-            target = Image.fromarray(mat['GTcls'][0]['Segmentation'][0])
-        else:
-            target = Image.open(file_path)
-        target_np = np.array(target, dtype=np.long)
+        assert class_id > 0
+        assert class_id < (len(self.visible_labels) + 1)
+        # To access visible_labels, we translate class_id back to 0-indexed
+        return deepcopy(self.class_map[self.visible_labels[class_id - 1]])
+    
+    def get_label_range(self):
+        return [i + 1 for i in range(len(self.visible_labels))]
 
-        # Annotation in VOC contains 255
-        target_np[target_np > 20] = -1
-        return target_np
-
-    def set_bg_pixel(self, target_np):
+    def __getitem__(self, idx: int):
+        assert 0 <= idx and idx < len(self.subset_idx)
+        img, target_tensor = self.vanilla_ds[self.subset_idx[idx]]
+        if not self.vanilla_label:
+            target_tensor = self.mask_pixel(target_tensor)
+        return img, target_tensor
+    
+    def mask_pixel(self, target_tensor):
         """
         Following OSLSM, we mask pixels not in current label set as 0. e.g., when
         self.train = True, pixels whose labels are in L_{test} are masked as background
-
         Parameters:
-            - target_np: segmentation mask (usually returned array from self.load_seg_mask)
-
+            - target_tensor: segmentation mask (usually returned array from self.load_seg_mask)
         Return:
             - Offseted and masked segmentation mask
         """
-        if not self.meta_test:
-            for x in self.val_label_set:
-                target_np[target_np == x] = 0
-            max_val_label = max(self.val_label_set)
-            target_np[target_np >
-                      max_val_label] = target_np[target_np > max_val_label] - 5
+        # Use the property that validation label split is contiguous to accelerate
+        min_val_label = min(self.val_label_set)
+        max_val_label = max(self.val_label_set)
+        if self.base_stage:
+            greater_pixel_idx = (target_tensor > max_val_label)
+            novel_pixel_idx = torch.logical_and(target_tensor >= min_val_label, torch.logical_not(greater_pixel_idx))
+            target_tensor[novel_pixel_idx] = 0
+            target_tensor[greater_pixel_idx] -= len(self.val_label_set)
         else:
-            label_mask_idx_map = []
-            for x in self.val_label_set:
-                label_mask_idx_map.append(target_np == x)
-            # handle -1 as ignore mask
-            ignore_mask = (target_np == -1)
-            target_np = np.zeros_like(target_np)
-            for i in range(len(label_mask_idx_map)):
-                target_np[label_mask_idx_map[i]] = i + 1
-            target_np[ignore_mask] = -1
-        return target_np
-
-    def get_img_containing_class(self, class_id):
-        """
-        Given a class label id (e.g., 2), return a list of all images in
-        the dataset containing at least one pixel of the class.
-
-        Parameters:
-            - class_id: an integer representing class
-
-        Return:
-            - a list of all images in the dataset containing at least one pixel of the class
-        """
-        return deepcopy(self.class_img_map[class_id])
-    
-    def get_class_in_an_image(self, img_idx):
-        """
-        Given an image idx (e.g., 123), return the list of classes in
-        the image.
-
-        Parameters:
-            - img_idx: an integer representing image
-
-        Return:
-            - list of classes in the image
-        """
-        return deepcopy(self.img_class_map[img_idx])
-
-    def __getitem__(self, idx):
-        # For both SBD and VOC2012, images are stored as .jpg
-        img = Image.open(self.images[idx]).convert("RGB")
-        img = self.to_tensor_func(img)
-
-        target_np = self.load_seg_mask(self.targets[idx])
-        target_np = self.set_bg_pixel(target_np)
-
-        return img, torch.tensor(target_np)
+            lesser_pixel_idx = (target_tensor < min_val_label)
+            greater_pixel_idx = (target_tensor > max_val_label)
+            ignore_pixel_idx = (target_tensor == -1)
+            target_tensor = target_tensor - (min_val_label - 1) # min_vis_label => 1 after this step
+            target_tensor[lesser_pixel_idx] = 0
+            target_tensor[greater_pixel_idx] = 0
+            target_tensor[ignore_pixel_idx] = -1
+        return target_tensor
 
 def get_train_set(cfg):
     folding = cfg.DATASET.PASCAL5i.folding
-    ds = Pascal5iReader('/data', folding, True)
+    ds = Pascal5iReader(utils.get_dataset_root(), folding, True, True, exclude_novel=True)
     return base_set(ds, "train", cfg)
+
+def get_unaug_train_set(cfg):
+    folding = cfg.DATASET.PASCAL5i.folding
+    ds = Pascal5iReader(utils.get_dataset_root(), folding, True, True, exclude_novel=True)
+    return base_set(ds, "test", cfg)
 
 def get_val_set(cfg):
     folding = cfg.DATASET.PASCAL5i.folding
-    ds = Pascal5iReader('/data', folding, False)
+    ds = Pascal5iReader(utils.get_dataset_root(), folding, True, False, exclude_novel=False)
     return base_set(ds, "test", cfg)
 
-def get_meta_train_set(cfg):
+def get_train_set_vanilla_label(cfg):
     folding = cfg.DATASET.PASCAL5i.folding
-    ds = Pascal5iReader('/data', folding, True)
+    ds = Pascal5iReader(utils.get_dataset_root(), folding, True, True, exclude_novel=True, vanilla_label=True)
     return base_set(ds, "train", cfg)
 
-def get_meta_test_set(cfg):
+def get_vanilla_train_set_vanilla_label(cfg):
     folding = cfg.DATASET.PASCAL5i.folding
-    ds = Pascal5iReader('/data', folding, False, meta_test=True)
+    ds = Pascal5iReader(utils.get_dataset_root(), folding, True, True, exclude_novel=True, vanilla_label=True)
+    return base_set(ds, "test", cfg)
+
+def get_continual_vanilla_train_set(cfg):
+    ds = PascalVOCSegReader(utils.get_dataset_root(), True, download=True)
+    return base_set(ds, "test", cfg) # Use test config to keep original scale of the image.
+
+def get_continual_aug_train_set(cfg):
+    ds = PascalVOCSegReader(utils.get_dataset_root(), True, download=True)
+    return base_set(ds, "train", cfg)
+
+def get_continual_test_set(cfg):
+    ds = PascalVOCSegReader(utils.get_dataset_root(), False, download=True)
     return base_set(ds, "test", cfg)

@@ -6,14 +6,11 @@ class identity_mod(nn.Module):
     def forward(self, x):
         return x
 
-def dispatcher(cfg, feature_shape, meta_test = False):
+def dispatcher(cfg, feature_shape, num_classes = -1):
     classifier_name = cfg.CLASSIFIER.classifier
-    if cfg.task.startswith('few_shot'):
-        # For few-shot task, use a special parameter
-        if meta_test:
-            num_classes = cfg.meta_testing_num_classes
-        else:
-            num_classes = cfg.meta_training_num_classes
+    if num_classes != -1:
+        # Specified by user. Manually override.
+        num_classes = num_classes
     else:
         # Usual task
         num_classes = cfg.num_classes
@@ -23,18 +20,18 @@ def dispatcher(cfg, feature_shape, meta_test = False):
         import classifier.fc as fc
         fc_classifier = fc.fc(cfg, feature_shape, num_classes)
         return fc_classifier
+    elif classifier_name == "cos":
+        import classifier.cos as cos
+        cos_classifier = cos.cos(cfg, feature_shape, num_classes)
+        return cos_classifier
+    elif classifier_name == "euclidean":
+        import classifier.euclidean as euclidean
+        l2_classifier = euclidean.euclidean(cfg, feature_shape, num_classes)
+        return l2_classifier
     elif classifier_name == "c1":
         import classifier.c1 as c1
         c1_seghead = c1.c1(cfg, feature_shape, num_classes)
         return c1_seghead
-    elif classifier_name == "fcn32s":
-        import classifier.fcn as fcn
-        fcn32s_head = fcn.fcn32s(cfg, feature_shape, num_classes)
-        return fcn32s_head
-    elif classifier_name == "fcn32s_cos":
-        import classifier.fcn_cos as fcn_cos
-        fcn32s_cos_head = fcn_cos.fcn32s_cos(cfg, feature_shape, num_classes)
-        return fcn32s_cos_head
     elif classifier_name == "identity":
         identity_module = identity_mod()
         return identity_module
