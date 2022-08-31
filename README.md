@@ -1,4 +1,6 @@
-# Roger's Deep Learning Tools of the Trade
+# ELESA: Extendible continuaL fEw-shot Segmentation frAmework
+
+## Roger's Deep Learning Tools of the Trade
 
 This codebase should be as generic as possible. Implementation of fancy ideas should be built
 in fork of this repo rather than working in the repo itself to allow rapid development.
