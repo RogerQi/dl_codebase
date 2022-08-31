@@ -29,6 +29,9 @@ def dataset_dispatcher(cfg):
     elif dataset_name == "pascal_5i":
         import dataset.pascal_5i
         return dataset.pascal_5i
+    elif dataset_name == "voc2012_5i":
+        import dataset.voc2012_5i
+        return dataset.voc2012_5i
     elif dataset_name == "scannet_25k":
         import dataset.scannet_25k
         return dataset.scannet_25k
