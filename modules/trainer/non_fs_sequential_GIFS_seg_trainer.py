@@ -1,22 +1,21 @@
 import numpy as np
 from copy import deepcopy
-from .GIFS_seg_trainer import GIFS_seg_trainer
+from .non_fs_GIFS_seg_trainer import non_fs_GIFS_seg_trainer
 
 
 def harmonic_mean(base_iou, novel_iou):
     return 2 / (1. / base_iou + 1. / novel_iou)
 
 
-class sequential_GIFS_seg_trainer(GIFS_seg_trainer):
+class non_fs_sequential_GIFS_seg_trainer(non_fs_GIFS_seg_trainer):
     def __init__(self, cfg, backbone_net, post_processor, criterion, dataset_module, device):
-        super(sequential_GIFS_seg_trainer, self).__init__(cfg, backbone_net, post_processor,
+        super(non_fs_sequential_GIFS_seg_trainer, self).__init__(cfg, backbone_net, post_processor,
                                                           criterion, dataset_module, device)
 
         self.continual_vanilla_train_set = dataset_module.get_continual_vanilla_train_set(cfg)
         self.continual_aug_train_set = dataset_module.get_continual_aug_train_set(cfg)
 
         self.partial_data_pool = {}
-        self.cfg = cfg
 
     def continual_test_single_pass(self, support_set):
         self.partial_data_pool = {}
@@ -77,6 +76,8 @@ class sequential_GIFS_seg_trainer(GIFS_seg_trainer):
                                                                 total_num_classes,
                                                                 masked_class=unseen_classes)
 
+            # print(mean_pixel_acc)
+
             classwise_iou = np.array(classwise_iou)
 
             # to handle background and 0-indexing
@@ -104,18 +105,7 @@ class sequential_GIFS_seg_trainer(GIFS_seg_trainer):
                                                             num_classes=21,
                                                             masked_class=None)
 
-        # learned_novel_class_idx = sorted(list(range(16, 21)))
-        # learned_novel_class_idx = sorted(list(range(11, 16)))
-        folding = self.cfg.DATASET.PASCAL5i.folding
-
-        if folding == 0:
-            learned_novel_class_idx = sorted(list(range(1, 6)))
-        elif folding == 1:
-            learned_novel_class_idx = sorted(list(range(6, 11)))
-        elif folding == 2:
-            learned_novel_class_idx = sorted(list(range(11, 16)))
-        else:
-            learned_novel_class_idx = sorted(list(range(16, 21)))
+        learned_novel_class_idx = sorted(list(range(16,21)))
 
         base_class_idx = self.train_set.dataset.visible_labels
         if 0 not in base_class_idx:
@@ -134,9 +124,10 @@ class sequential_GIFS_seg_trainer(GIFS_seg_trainer):
                 continue
         self.test_base_iou.append(np.mean(base_iou_list))
         self.test_novel_iou.append(np.mean(novel_iou_list))
-        ###############################################################
+###############################################################
 
         # Restore weights
+        # if not final:
         self.backbone_net = self.vanilla_backbone_net
         self.post_processor = self.vanilla_post_processor
 

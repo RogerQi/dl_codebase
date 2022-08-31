@@ -14,9 +14,9 @@ def harmonic_mean(base_iou, novel_iou):
     return 2 / (1. / base_iou + 1. / novel_iou)
 
 
-class GIFS_seg_trainer(seg_trainer):
+class non_fs_GIFS_seg_trainer(seg_trainer):
     def __init__(self, cfg, backbone_net, post_processor, criterion, dataset_module, device):
-        super(GIFS_seg_trainer, self).__init__(cfg, backbone_net, post_processor, criterion,
+        super(non_fs_GIFS_seg_trainer, self).__init__(cfg, backbone_net, post_processor, criterion,
                                                dataset_module, device)
 
         self.continual_vanilla_train_set = dataset_module.get_continual_vanilla_train_set(cfg)
@@ -35,8 +35,6 @@ class GIFS_seg_trainer(seg_trainer):
     # self.val_one is inherited from seg trainer
 
     def test_one(self, device, num_runs=5):
-        num_shots = self.cfg.TASK_SPECIFIC.GIFS.num_shots
-
         # Parse image candidates
         testing_label_candidates = self.train_set.dataset.invisible_labels
 
@@ -59,40 +57,38 @@ class GIFS_seg_trainer(seg_trainer):
         seed_list = np.random.randint(0, 99999, size=(num_runs,))
 
         # Meta Test!
-        run_base_iou_list = []
-        run_novel_iou_list = []
-        run_total_iou_list = []
-        run_harm_iou_list = []
+        # run_base_iou_list = []
+        # run_novel_iou_list = []
+        # run_total_iou_list = []
+        # run_harm_iou_list = []
         for i in range(num_runs):
             np.random.seed(seed_list[i])
             random.seed(seed_list[i])
             torch.manual_seed(seed_list[i])
             support_set = {}
             for k in image_candidates.keys():
-                assert len(image_candidates[k]) > num_shots, "fewer samples than num_shots?"
                 selected_idx = []
                 iter_cnt = 0
-                for _ in range(num_shots):
-                    idx = random.choice(image_candidates[k])
-                    while True:
-                        iter_cnt += 1
-                        if iter_cnt > num_shots + 20:
-                            raise ValueError("Malformed image candidates?")
-                        novel_img_chw, mask_hw = self.continual_vanilla_train_set[idx]
-                        pixel_sum = torch.sum(mask_hw == k)
-                        assert pixel_sum > 0, f"Sample {idx} does not contain class {k}"
-                        # If the selected sample is bad (more than 1px) and has not been selected,
-                        # we choose the example.
-                        if pixel_sum != 1 and idx not in selected_idx:
-                            selected_idx.append(idx)
-                            break
-                        else:
-                            idx = random.choice(image_candidates[k])
-                assert len(selected_idx) == num_shots
+################################################################################
+                for h in range(len(image_candidates[k])):
+                    idx = image_candidates[k][h]
+                    iter_cnt += 1
+                    novel_img_chw, mask_hw = self.continual_vanilla_train_set[idx]
+                    pixel_sum = torch.sum(mask_hw == k)
+                    assert pixel_sum > 0, f"Sample {idx} does not contain class {k}"
+                    # If the selected sample is bad (more than 1px) and has not been selected,
+                    # we choose the example.
+                    if pixel_sum != 1 and idx not in selected_idx:
+                        selected_idx.append(idx)
+################################################################################
                 support_set[k] = list(selected_idx)
 
             # get per-class IoU on the entire validation set based on results from the support set
             classwise_iou = self.continual_test_single_pass(support_set)
+            # if i == num_runs-1:
+            #     classwise_iou = self.continual_test_single_pass(support_set, final=True)
+            # else:
+            #     classwise_iou = self.continual_test_single_pass(support_set, final=False)
 
             novel_iou_list = []
             base_iou_list = []
@@ -110,26 +106,71 @@ class GIFS_seg_trainer(seg_trainer):
             # run_novel_iou_list.append(novel_iou)
             # run_total_iou_list.append(np.mean(classwise_iou))
             # run_harm_iou_list.append(harmonic_mean(base_iou, novel_iou))
-        # print("Results of {} runs with {} shots".format(num_runs, num_shots))
-        # print("Base IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_base_iou_list), np.std(run_base_iou_list)))
-        # print("Novel IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_novel_iou_list), np.std(run_novel_iou_list)))
-        # print("Harmonic IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_harm_iou_list), np.std(run_harm_iou_list)))
-        # print("Total IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_total_iou_list), np.std(run_total_iou_list)))
+
+
+        ## final result is the average of each epoch's result
+        # classwise_iou, mean_pixel_acc = self.eval_on_loader(self.continual_test_loader,
+        #                                                           num_classes=21,
+        #                                                           masked_class=None)
+        # classwise_iou = np.array(classwise_iou)
+        #
+        # # print("classwise iou is: ")
+        # # print(classwise_iou)
+        # # print('\n')
+        #
+        # # to handle background and 0-indexing
+        # novel_iou_list = []
+        # base_iou_list = []
+        #
+        # learned_novel_class_idx = sorted(list(image_candidates.keys()))
+        #
+        # base_class_idx = self.train_set.dataset.visible_labels
+        # if 0 not in base_class_idx:
+        #     base_class_idx.append(0)
+        # base_class_idx = sorted(base_class_idx)
+        #
+        # for i in range(len(classwise_iou)):
+        #     label = i
+        #     if label in learned_novel_class_idx:
+        #         novel_iou_list.append(classwise_iou[i])
+        #     elif label in base_class_idx:
+        #         base_iou_list.append(classwise_iou[i])
+        #     else:
+        #         continue
+        # base_iou = np.mean(base_iou_list)
+        # novel_iou = np.mean(novel_iou_list)
+
+        # print("Results of {} runs in a non-few-shot setting".format(num_runs))
+        # print("Base IoU: {:.4f} Novel IoU: {:.4f}".format(base_iou, novel_iou))
+        # print("Novel class wise IoU: {}".format(novel_iou_list))
+
+
+        ## final result obtained by running test at the end
         print("test base iou: ")
         print(self.test_base_iou)
         print("test novel iou: ")
         print(self.test_novel_iou)
         total_mean_iou = np.add(self.test_base_iou, self.test_novel_iou) / 2
-        max_mean_iou_index = np.where(total_mean_iou == np.amax(total_mean_iou))[0][0]
+        max_mean_iou_index = np.where(total_mean_iou==np.amax(total_mean_iou))[0][0]
 
         print("Results of {} runs in a non-few-shot setting".format(num_runs))
         # print("max Base IoU: {:.4f} max Novel IoU: {:.4f}".format(np.max(self.test_base_iou), np.max(self.test_novel_iou)))
-        print("max Base IoU: {:.4f} max Novel IoU: {:.4f}".format(
-            self.test_base_iou[max_mean_iou_index],
-            self.test_novel_iou[max_mean_iou_index]))
+        print("max Base IoU: {:.4f} max Novel IoU: {:.4f}".format(self.test_base_iou[max_mean_iou_index],
+                                                                  self.test_novel_iou[max_mean_iou_index]))
 
         print("mean Base IoU: {:.4f} mean Novel IoU: {:.4f}".format(np.mean(self.test_base_iou),
-                                                                    np.mean(self.test_novel_iou)))
+                                                          np.mean(self.test_novel_iou)))
+        # print("Novel class wise IoU: {}".format(novel_iou_list))
+
+        # print("Results of {} runs in a non-few-shot setting".format(num_runs))
+        # print("Base IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_base_iou_list),
+        #                                                  np.std(run_base_iou_list)))
+        # print("Novel IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_novel_iou_list),
+        #                                                   np.std(run_novel_iou_list)))
+        # print("Harmonic IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_harm_iou_list),
+        #                                                      np.std(run_harm_iou_list)))
+        # print("Total IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_total_iou_list),
+        #                                                   np.std(run_total_iou_list)))
 
     def classifier_weight_imprinting(self, base_id_list: List[int], novel_id_list: List[int],
                                      support_set: dict):
