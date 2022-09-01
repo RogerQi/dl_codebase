@@ -291,6 +291,19 @@ class non_fs_incremental_trainer(non_fs_sequential_GIFS_seg_trainer):
             for c in self.context_similar_map:
                 self.context_similar_map[c] = list(set(self.context_similar_map[c]))
 
+        ################################################################
+        for past_novel_obj_id in self.partial_data_pool.keys():
+            # selected_idx = []
+            # print('number of pool data for past novel class {} before: {}'.format(past_novel_obj_id, len(
+            #     self.partial_data_pool[past_novel_obj_id])))
+            if len(self.partial_data_pool[past_novel_obj_id]) > self.cfg.TASK_SPECIFIC.GIFS.num_shots:
+                selected_idx = random.sample(self.partial_data_pool[past_novel_obj_id], k=self.cfg.TASK_SPECIFIC.GIFS.num_shots)
+                self.partial_data_pool[past_novel_obj_id] = selected_idx
+                # print('number of pool data for past novel class {} after: {}'.format(past_novel_obj_id, len(
+                #                                                           self.partial_data_pool[
+                #                                                               past_novel_obj_id])))
+        ################################################################
+
         for novel_obj_id in novel_class_idx:
             assert novel_obj_id in support_set
             for idx in support_set[novel_obj_id]:
@@ -301,11 +314,10 @@ class non_fs_incremental_trainer(non_fs_sequential_GIFS_seg_trainer):
                 # Minimum bounding rectangle computed; now register it to the data pool
                 if novel_obj_id not in self.partial_data_pool:
                     self.partial_data_pool[novel_obj_id] = []
-                if len(self.partial_data_pool[novel_obj_id]) >= size:
-                    self.partial_data_pool[novel_obj_id].pop(0)
-                self.partial_data_pool[novel_obj_id].append((img_roi, mask_roi))
 
-                # self.partial_data_pool[novel_obj_id].append((img_roi, mask_roi))
+                self.partial_data_pool[novel_obj_id].append((img_roi, mask_roi))
+            print('number of pool data for current class {}: {}'.format(novel_obj_id, len(
+                self.partial_data_pool[novel_obj_id])))
 
         self.backbone_net.train()
         self.post_processor.train()
