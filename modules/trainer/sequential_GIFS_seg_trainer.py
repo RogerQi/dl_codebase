@@ -2,22 +2,18 @@ import numpy as np
 from copy import deepcopy
 from .GIFS_seg_trainer import GIFS_seg_trainer
 
-
 def harmonic_mean(base_iou, novel_iou):
     return 2 / (1. / base_iou + 1. / novel_iou)
 
-
 class sequential_GIFS_seg_trainer(GIFS_seg_trainer):
     def __init__(self, cfg, backbone_net, post_processor, criterion, dataset_module, device):
-        super(sequential_GIFS_seg_trainer, self).__init__(cfg, backbone_net, post_processor,
-                                                          criterion, dataset_module, device)
+        super(sequential_GIFS_seg_trainer, self).__init__(cfg, backbone_net, post_processor, criterion, dataset_module, device)
 
         self.continual_vanilla_train_set = dataset_module.get_continual_vanilla_train_set(cfg)
         self.continual_aug_train_set = dataset_module.get_continual_aug_train_set(cfg)
-
+        
         self.partial_data_pool = {}
-        self.cfg = cfg
-
+    
     def continual_test_single_pass(self, support_set):
         self.partial_data_pool = {}
         self.context_similar_map = {}
@@ -36,10 +32,8 @@ class sequential_GIFS_seg_trainer(GIFS_seg_trainer):
         total_num_classes = len(all_novel_class_idx) + len(base_class_idx)
 
         # Construct task batches
-        assert len(
-            all_novel_class_idx) % self.cfg.TASK_SPECIFIC.GIFS.sequential_dataset_num_classes == 0
-        num_tasks = len(
-            all_novel_class_idx) // self.cfg.TASK_SPECIFIC.GIFS.sequential_dataset_num_classes
+        assert len(all_novel_class_idx) % self.cfg.TASK_SPECIFIC.GIFS.sequential_dataset_num_classes == 0
+        num_tasks = len(all_novel_class_idx) // self.cfg.TASK_SPECIFIC.GIFS.sequential_dataset_num_classes
         ptr = 0
         task_stream = []
         for i in range(num_tasks):
@@ -53,17 +47,15 @@ class sequential_GIFS_seg_trainer(GIFS_seg_trainer):
         for i, task in enumerate(task_stream):
             self.prv_backbone_net = deepcopy(self.backbone_net)
             self.prv_post_processor = deepcopy(self.post_processor)
-
+            
             self.prv_backbone_net.eval()
             self.prv_post_processor.eval()
             self.backbone_net.eval()
             self.post_processor.eval()
 
-            if len(base_class_idx) != \
-                    self.prv_post_processor.pixel_classifier.class_mat.weight.data.shape[0]:
+            if len(base_class_idx) != self.prv_post_processor.pixel_classifier.class_mat.weight.data.shape[0]:
                 # squeeze the classifier weights
-                self.prv_post_processor.pixel_classifier.class_mat.weight.data = \
-                self.prv_post_processor.pixel_classifier.class_mat.weight.data[base_class_idx]
+                self.prv_post_processor.pixel_classifier.class_mat.weight.data = self.prv_post_processor.pixel_classifier.class_mat.weight.data[base_class_idx]
 
             self.novel_adapt(base_class_idx, task, support_set)
             learned_novel_class_idx += task
@@ -73,9 +65,7 @@ class sequential_GIFS_seg_trainer(GIFS_seg_trainer):
             # https://github.com/fcdl94/FSS/blob/master/metrics/stream_metrics.py#L92
             unseen_classes = [i for i in support_set.keys() if i not in learned_novel_class_idx]
             print(f"Classes {unseen_classes} are masked from current evaluation.")
-            classwise_iou, mean_pixel_acc = self.eval_on_loader(self.continual_test_loader,
-                                                                total_num_classes,
-                                                                masked_class=unseen_classes)
+            classwise_iou, mean_pixel_acc = self.eval_on_loader(self.continual_test_loader, total_num_classes, masked_class=unseen_classes)
 
             classwise_iou = np.array(classwise_iou)
 
@@ -98,43 +88,6 @@ class sequential_GIFS_seg_trainer(GIFS_seg_trainer):
 
             base_class_idx += task
             base_class_idx = sorted(base_class_idx)
-
-        ###############################################################
-        classwise_iou, mean_pixel_acc = self.eval_on_loader(self.continual_test_loader,
-                                                            num_classes=21,
-                                                            masked_class=None)
-
-        # learned_novel_class_idx = sorted(list(range(16, 21)))
-        # learned_novel_class_idx = sorted(list(range(11, 16)))
-        folding = self.cfg.DATASET.PASCAL5i.folding
-
-        if folding == 0:
-            learned_novel_class_idx = sorted(list(range(1, 6)))
-        elif folding == 1:
-            learned_novel_class_idx = sorted(list(range(6, 11)))
-        elif folding == 2:
-            learned_novel_class_idx = sorted(list(range(11, 16)))
-        else:
-            learned_novel_class_idx = sorted(list(range(16, 21)))
-
-        base_class_idx = self.train_set.dataset.visible_labels
-        if 0 not in base_class_idx:
-            base_class_idx.append(0)
-        base_class_idx = sorted(base_class_idx)
-
-        novel_iou_list = []
-        base_iou_list = []
-        for i in range(len(classwise_iou)):
-            label = i
-            if label in learned_novel_class_idx:
-                novel_iou_list.append(classwise_iou[i])
-            elif label in base_class_idx:
-                base_iou_list.append(classwise_iou[i])
-            else:
-                continue
-        self.test_base_iou.append(np.mean(base_iou_list))
-        self.test_novel_iou.append(np.mean(novel_iou_list))
-        ###############################################################
 
         # Restore weights
         self.backbone_net = self.vanilla_backbone_net

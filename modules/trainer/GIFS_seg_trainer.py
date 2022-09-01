@@ -9,42 +9,32 @@ import utils
 
 from .seg_trainer import seg_trainer
 
-
 def harmonic_mean(base_iou, novel_iou):
     return 2 / (1. / base_iou + 1. / novel_iou)
 
-
 class GIFS_seg_trainer(seg_trainer):
     def __init__(self, cfg, backbone_net, post_processor, criterion, dataset_module, device):
-        super(GIFS_seg_trainer, self).__init__(cfg, backbone_net, post_processor, criterion,
-                                               dataset_module, device)
+        super(GIFS_seg_trainer, self).__init__(cfg, backbone_net, post_processor, criterion, dataset_module, device)
 
         self.continual_vanilla_train_set = dataset_module.get_continual_vanilla_train_set(cfg)
         self.continual_aug_train_set = dataset_module.get_continual_aug_train_set(cfg)
         self.continual_test_set = dataset_module.get_continual_test_set(cfg)
 
-        self.continual_test_loader = torch.utils.data.DataLoader(self.continual_test_set,
-                                                                 batch_size=cfg.TEST.batch_size,
-                                                                 shuffle=False,
-                                                                 **self.loader_kwargs)
-
-        self.test_base_iou = []
-        self.test_novel_iou = []
+        self.continual_test_loader = torch.utils.data.DataLoader(self.continual_test_set, batch_size=cfg.TEST.batch_size, shuffle=False, **self.loader_kwargs)
 
     # self.train_one is inherited from seg trainer
     # self.val_one is inherited from seg trainer
 
     def test_one(self, device, num_runs=5):
         num_shots = self.cfg.TASK_SPECIFIC.GIFS.num_shots
-
+        
         # Parse image candidates
         testing_label_candidates = self.train_set.dataset.invisible_labels
 
         vanilla_image_candidates = {}
         for l in testing_label_candidates:
-            vanilla_image_candidates[l] = set(
-                self.continual_vanilla_train_set.dataset.get_class_map(l))
-
+            vanilla_image_candidates[l] = set(self.continual_vanilla_train_set.dataset.get_class_map(l))
+        
         # To ensure only $num_shots$ number of examples are used
         image_candidates = {}
         for k_i in vanilla_image_candidates:
@@ -56,8 +46,8 @@ class GIFS_seg_trainer(seg_trainer):
 
         # We use a total of $num_runs$ consistent random seeds.
         np.random.seed(1234)
-        seed_list = np.random.randint(0, 99999, size=(num_runs,))
-
+        seed_list = np.random.randint(0, 99999, size = (num_runs, ))
+        
         # Meta Test!
         run_base_iou_list = []
         run_novel_iou_list = []
@@ -90,7 +80,7 @@ class GIFS_seg_trainer(seg_trainer):
                             idx = random.choice(image_candidates[k])
                 assert len(selected_idx) == num_shots
                 support_set[k] = list(selected_idx)
-
+        
             # get per-class IoU on the entire validation set based on results from the support set
             classwise_iou = self.continual_test_single_pass(support_set)
 
@@ -103,36 +93,18 @@ class GIFS_seg_trainer(seg_trainer):
                     base_iou_list.append(classwise_iou[i])
             base_iou = np.mean(base_iou_list)
             novel_iou = np.mean(novel_iou_list)
-            print("Base IoU: {:.4f} Novel IoU: {:.4f} Total IoU: {:.4f}".format(base_iou, novel_iou,
-                                                                                np.mean(
-                                                                                    classwise_iou)))
-            # run_base_iou_list.append(base_iou)
-            # run_novel_iou_list.append(novel_iou)
-            # run_total_iou_list.append(np.mean(classwise_iou))
-            # run_harm_iou_list.append(harmonic_mean(base_iou, novel_iou))
-        # print("Results of {} runs with {} shots".format(num_runs, num_shots))
-        # print("Base IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_base_iou_list), np.std(run_base_iou_list)))
-        # print("Novel IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_novel_iou_list), np.std(run_novel_iou_list)))
-        # print("Harmonic IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_harm_iou_list), np.std(run_harm_iou_list)))
-        # print("Total IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_total_iou_list), np.std(run_total_iou_list)))
-        print("test base iou: ")
-        print(self.test_base_iou)
-        print("test novel iou: ")
-        print(self.test_novel_iou)
-        total_mean_iou = np.add(self.test_base_iou, self.test_novel_iou) / 2
-        max_mean_iou_index = np.where(total_mean_iou == np.amax(total_mean_iou))[0][0]
-
-        print("Results of {} runs in a non-few-shot setting".format(num_runs))
-        # print("max Base IoU: {:.4f} max Novel IoU: {:.4f}".format(np.max(self.test_base_iou), np.max(self.test_novel_iou)))
-        print("max Base IoU: {:.4f} max Novel IoU: {:.4f}".format(
-            self.test_base_iou[max_mean_iou_index],
-            self.test_novel_iou[max_mean_iou_index]))
-
-        print("mean Base IoU: {:.4f} mean Novel IoU: {:.4f}".format(np.mean(self.test_base_iou),
-                                                                    np.mean(self.test_novel_iou)))
-
-    def classifier_weight_imprinting(self, base_id_list: List[int], novel_id_list: List[int],
-                                     support_set: dict):
+            print("Base IoU: {:.4f} Novel IoU: {:.4f} Total IoU: {:.4f}".format(base_iou, novel_iou, np.mean(classwise_iou)))
+            run_base_iou_list.append(base_iou)
+            run_novel_iou_list.append(novel_iou)
+            run_total_iou_list.append(np.mean(classwise_iou))
+            run_harm_iou_list.append(harmonic_mean(base_iou, novel_iou))
+        print("Results of {} runs with {} shots".format(num_runs, num_shots))
+        print("Base IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_base_iou_list), np.std(run_base_iou_list)))
+        print("Novel IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_novel_iou_list), np.std(run_novel_iou_list)))
+        print("Harmonic IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_harm_iou_list), np.std(run_harm_iou_list)))
+        print("Total IoU Mean: {:.4f} Std: {:.4f}".format(np.mean(run_total_iou_list), np.std(run_total_iou_list)))
+    
+    def classifier_weight_imprinting(self, base_id_list: List[int], novel_id_list: List[int], support_set: dict):
         """Use masked average pooling to initialize a new 1x1 convolutional HEAD for semantic segmentation
 
         The resulting classifier will produce per-pixel classification from class 0 (usually background)
@@ -154,15 +126,14 @@ class GIFS_seg_trainer(seg_trainer):
         assert self.prv_post_processor is not None
         max_cls = self.cfg.meta_testing_num_classes
         assert max_cls >= max(max(base_id_list), max(novel_id_list)) + 1
-        assert self.prv_post_processor.pixel_classifier.class_mat.weight.data.shape[0] == len(
-            base_id_list)
+        assert self.prv_post_processor.pixel_classifier.class_mat.weight.data.shape[0] == len(base_id_list)
 
         ori_cnt = 0
         class_weight_vec_list = []
         for c in range(max_cls):
             if c in novel_id_list:
                 # Aggregate all candidates in support set
-                vec_list = []  # store MAP result for every image
+                vec_list = [] # store MAP result for every image
                 assert c in support_set
                 for idx in support_set[c]:
                     img_chw, mask_hw = self.continual_vanilla_train_set[idx]
@@ -172,31 +143,28 @@ class GIFS_seg_trainer(seg_trainer):
                     assert c in supp_mask_bhw_tensor
                     with torch.no_grad():
                         support_feature = self.prv_backbone_net(supp_img_bchw_tensor)
-                        class_weight_vec = utils.masked_average_pooling(supp_mask_bhw_tensor == c,
-                                                                        support_feature, True)
+                        class_weight_vec = utils.masked_average_pooling(supp_mask_bhw_tensor == c, support_feature, True)
                         vec_list.append(class_weight_vec)
                 class_weight_vec = torch.mean(torch.stack(vec_list), dim=0)
             elif c in base_id_list:
                 # base class. Copy weight from learned HEAD
-                class_weight_vec = self.prv_post_processor.pixel_classifier.class_mat.weight.data[
-                    ori_cnt]
+                class_weight_vec = self.prv_post_processor.pixel_classifier.class_mat.weight.data[ori_cnt]
                 ori_cnt += 1
             else:
                 # not used class
-                class_weight_vec = torch.zeros_like(
-                    self.prv_post_processor.pixel_classifier.class_mat.weight.data[0])
-            class_weight_vec = class_weight_vec.reshape((-1, 1, 1))  # C x 1 x 1
+                class_weight_vec = torch.zeros_like(self.prv_post_processor.pixel_classifier.class_mat.weight.data[0])
+            class_weight_vec = class_weight_vec.reshape((-1, 1, 1)) # C x 1 x 1
             class_weight_vec_list.append(class_weight_vec)
-
-        classifier_weights = torch.stack(class_weight_vec_list)  # num_classes x C x 1 x 1
+        
+        classifier_weights = torch.stack(class_weight_vec_list) # num_classes x C x 1 x 1
         return classifier_weights
-
+    
     def finetune_backbone(self, base_class_idx, novel_class_idx, support_set):
         raise NotImplementedError
-
+    
     def continual_test_single_pass(self, support_set):
         raise NotImplementedError
-
+    
     def novel_adapt(self, base_class_idx, novel_class_idx, support_set):
         """Novel adapt for quantitative evaluation on dataset
 
@@ -206,12 +174,10 @@ class GIFS_seg_trainer(seg_trainer):
             support_set (dict): dictionary with novel_class_idx as keys and dataset idx as values
         """
         max_cls = max(max(base_class_idx), max(novel_class_idx)) + 1
-        self.post_processor = classifier.dispatcher(self.cfg, self.feature_shape,
-                                                    num_classes=max_cls)
+        self.post_processor = classifier.dispatcher(self.cfg, self.feature_shape, num_classes=max_cls)
         self.post_processor = self.post_processor.to(self.device)
         # Aggregate weights
-        aggregated_weights = self.classifier_weight_imprinting(base_class_idx, novel_class_idx,
-                                                               support_set)
+        aggregated_weights = self.classifier_weight_imprinting(base_class_idx, novel_class_idx, support_set)
         self.post_processor.pixel_classifier.class_mat.weight.data = aggregated_weights
 
         # Optimization over support set to fine-tune initialized vectors
