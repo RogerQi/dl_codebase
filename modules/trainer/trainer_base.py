@@ -3,6 +3,7 @@ import torch
 
 from abc import abstractmethod
 
+
 class trainer_base(object):
     def __init__(self, cfg, backbone_net, post_processor, criterion, dataset_module, device):
         self.cfg = cfg
@@ -16,7 +17,8 @@ class trainer_base(object):
         self.train_set = dataset_module.get_train_set(cfg)
         self.val_set = dataset_module.get_val_set(cfg)
 
-        print("Training set contains {} data points. Val set contains {} data points.".format(len(self.train_set), len(self.val_set)))
+        print("Training set contains {} data points. Val set contains {} data points.".format(
+            len(self.train_set), len(self.val_set)))
 
         # Prepare loaders
         # TODO: change to iteration-based loader rather than epoch-based.
@@ -25,8 +27,11 @@ class trainer_base(object):
             'pin_memory': cfg.SYSTEM.pin_memory,
             'drop_last': True}
 
-        self.train_loader = torch.utils.data.DataLoader(self.train_set, batch_size=cfg.TRAIN.batch_size, shuffle=True, **self.loader_kwargs)
-        self.val_loader = torch.utils.data.DataLoader(self.val_set, batch_size=cfg.TEST.batch_size, shuffle=False, **self.loader_kwargs)
+        self.train_loader = torch.utils.data.DataLoader(self.train_set,
+                                                        batch_size=cfg.TRAIN.batch_size,
+                                                        shuffle=True, **self.loader_kwargs)
+        self.val_loader = torch.utils.data.DataLoader(self.val_set, batch_size=cfg.TEST.batch_size,
+                                                      shuffle=False, **self.loader_kwargs)
 
     @abstractmethod
     def train_one(self, device, optimizer, epoch):
@@ -43,12 +48,13 @@ class trainer_base(object):
     @abstractmethod
     def live_run(self, device):
         raise NotImplementedError
-    
+
     def adapt_scheduler(self, start_epoch, scheduler):
         assert isinstance(start_epoch, int) and start_epoch >= 1
         if start_epoch > 1:
             if self.cfg.TRAIN.step_per_iter:
-                elapsed_iter = math.ceil(len(self.train_set)  / self.cfg.TRAIN.batch_size) * (start_epoch - 1)
+                elapsed_iter = math.ceil(len(self.train_set) / self.cfg.TRAIN.batch_size) * (
+                            start_epoch - 1)
                 for _ in range(elapsed_iter):
                     scheduler.step()
             else:
@@ -58,7 +64,6 @@ class trainer_base(object):
 
     def save_model(self, file_path):
         """Save default model (backbone_net, post_processor to a specified file path)
-
         Args:
             file_path (str): path to save the model
         """
@@ -66,10 +71,9 @@ class trainer_base(object):
             "backbone": self.backbone_net.state_dict(),
             "head": self.post_processor.state_dict()
         }, file_path)
-    
+
     def load_model(self, file_path):
         """Load weights for default model components (backbone_net, post_process) from a given file path
-
         Args:
             file_path (str): path to trained weights
         """

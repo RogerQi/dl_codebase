@@ -20,6 +20,8 @@ def dispatcher(cfg):
         from .voc2012_seg import get_train_set, get_val_set
     elif dataset_name == "pascal_5i":
         from .pascal_5i import get_train_set, get_val_set
+    elif dataset_name == "voc2012_5i":
+        from .voc2012_5i import get_train_set, get_val_set
     elif dataset_name == "scannet_25k":
         from .scannet_25k import get_train_set, get_val_set
     elif dataset_name == "coco_20i":

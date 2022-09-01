@@ -20,6 +20,9 @@ def dispatcher(cfg):
     elif task_name == "few_shot_incremental":
         from .fs_incremental_trainer import fs_incremental_trainer as fs_incremental_trainer_fn
         return fs_incremental_trainer_fn
+    elif task_name == "non_few_shot_incremental":
+        from .non_fs_incremental_trainer import non_fs_incremental_trainer as non_fs_incremental_trainer_fn
+        return non_fs_incremental_trainer_fn
     elif task_name == "live_continual_seg":
         from .live_continual_seg_trainer import live_continual_seg_trainer as live_con_seg_trainer_fn
         return live_con_seg_trainer_fn
