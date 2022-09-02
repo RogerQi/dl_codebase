@@ -1,6 +1,0 @@
-name: 'voc2012_split3_non_fs'
-BASE_YAML: './voc2012_5i_base.yaml'
-
-DATASET:
-  PASCAL5i:
-    folding: 3
