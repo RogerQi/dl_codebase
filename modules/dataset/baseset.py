@@ -35,19 +35,22 @@ class base_set(torch.utils.data.Dataset):
         assert split in ["train", "test"]
         self.cfg = cfg
         self.dataset = dataset
-        if split == "train":
-            transforms_config_node = cfg.DATASET.TRANSFORM.TRAIN
-        else:
-            transforms_config_node = cfg.DATASET.TRANSFORM.TEST
-        data_trans_ops, joint_trans_ops = dispatcher(transforms_config_node)
-        self.data_transforms = self._get_mono_transforms(transforms_config_node, data_trans_ops)
-        self.joint_transforms = self._get_joint_transforms(transforms_config_node, joint_trans_ops)
+        self.split = split
+
+        train_ops, joint_train_ops = dispatcher(cfg.DATASET.TRANSFORM.TRAIN)
+        self.train_data_transforms = self._get_mono_transforms(cfg.DATASET.TRANSFORM.TRAIN, train_ops)
+        self.train_joint_transforms = self._get_joint_transforms(cfg.DATASET.TRANSFORM.TRAIN, joint_train_ops)
+
+        test_ops, joint_test_ops = dispatcher(cfg.DATASET.TRANSFORM.TEST)
+        self.test_data_transforms = self._get_mono_transforms(cfg.DATASET.TRANSFORM.TEST, test_ops)
+        self.test_joint_transforms = self._get_joint_transforms(cfg.DATASET.TRANSFORM.TEST, joint_test_ops)
     
     def __getitem__(self, key):
         if isinstance(key, tuple):
             assert len(key) == 2
-            assert isinstance(key[0], int)
+            assert isinstance(key[0], int) or isinstance(key[0], np.integer)
             assert isinstance(key[1], dict)
+            index = key[0]
             params = key[1]
         elif isinstance(key, int) or isinstance(key, np.integer):
             index = key
@@ -55,8 +58,21 @@ class base_set(torch.utils.data.Dataset):
         else:
             raise NotImplementedError
         data, label = self.dataset[index]
-        data = self.data_transforms(data)
-        data, label = self.joint_transforms(data, label)
+
+        # Flag which determines if train transform is used or test transforms
+        aug_flag = (self.split == 'train')
+        # Augmentation flag can be manually overriden
+        if 'aug' in params:
+            assert params['aug'] in [True, False]
+            aug_flag = params['aug']
+
+        if aug_flag:
+            data = self.train_data_transforms(data)
+            data, label = self.train_joint_transforms(data, label)
+        else:
+            data = self.test_data_transforms(data)
+            data, label = self.test_joint_transforms(data, label)
+
         return (data, label)
 
     def __len__(self):

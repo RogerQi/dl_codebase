@@ -12,7 +12,6 @@ class non_fs_sequential_GIFS_seg_trainer(non_fs_GIFS_seg_trainer):
         super(non_fs_sequential_GIFS_seg_trainer, self).__init__(cfg, backbone_net, post_processor,
                                                           criterion, dataset_module, device)
 
-        self.continual_vanilla_train_set = dataset_module.get_continual_vanilla_train_set(cfg)
         self.continual_aug_train_set = dataset_module.get_continual_aug_train_set(cfg)
 
         self.partial_data_pool = {}

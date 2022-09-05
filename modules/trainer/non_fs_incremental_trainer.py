@@ -48,8 +48,6 @@ class non_fs_incremental_trainer(non_fs_sequential_GIFS_seg_trainer):
         self.demo_pool = {}
 
         self.train_set_vanilla_label = dataset_module.get_train_set_vanilla_label(cfg)
-        self.vanilla_train_set = dataset_module.get_vanilla_train_set_vanilla_label(cfg)
-        self.train_set_unaug = dataset_module.get_unaug_train_set(cfg)
 
         self.context_aware_prob = self.cfg.TASK_SPECIFIC.GIFS.context_aware_sampling_prob
 
@@ -87,8 +85,8 @@ class non_fs_incremental_trainer(non_fs_sequential_GIFS_seg_trainer):
                     similarity_dic[c] = []
 
                 # Maintain a m-size heap to store the top m images of each class
-                for i in tqdm(range(len(self.train_set_unaug))):
-                    img, mask = self.train_set_unaug[i]
+                for i in tqdm(range(len(self.train_set))):
+                    img, mask = self.train_set[(i, {'aug': False})]
                     class_list = torch.unique(mask).tolist()
                     img_tensor = torch.stack([img]).to(self.device)
                     mask_tensor = torch.stack([mask]).to(self.device)
@@ -252,12 +250,12 @@ class non_fs_incremental_trainer(non_fs_sequential_GIFS_seg_trainer):
 
     def scene_model_setup(self):
         # Load torchscript
-        self.scene_model = torch.jit.load('/root/autodl-tmp/data/cvpr2022/vgg16_scene_net.pt')
+        self.scene_model = torch.jit.load('/data/cvpr2022/vgg16_scene_net.pt')
         self.scene_model = self.scene_model.to(self.device)
         # Compute feature vectors for data in the pool
         self.base_pool_cos_embeddings = []
         for base_data_idx in self.base_img_candidates:
-            img_chw, _ = self.vanilla_train_set[base_data_idx]
+            img_chw, _ = self.train_set[(base_data_idx, {'aug': False})]
             img_chw = img_chw.to(self.device)
             scene_embedding = self.get_scene_embedding(img_chw)
             assert len(scene_embedding.shape) == 1
@@ -274,7 +272,7 @@ class non_fs_incremental_trainer(non_fs_sequential_GIFS_seg_trainer):
             for novel_obj_id in novel_class_idx:
                 assert novel_obj_id in support_set
                 for idx in support_set[novel_obj_id]:
-                    novel_img_chw, mask_hw = self.continual_vanilla_train_set[idx]
+                    novel_img_chw, mask_hw = self.continual_train_set[(idx, {'aug': False})]
 
                     # Compute cosine embedding
                     scene_embedding = self.get_scene_embedding(novel_img_chw.to(self.device))
@@ -296,8 +294,8 @@ class non_fs_incremental_trainer(non_fs_sequential_GIFS_seg_trainer):
             # selected_idx = []
             # print('number of pool data for past novel class {} before: {}'.format(past_novel_obj_id, len(
             #     self.partial_data_pool[past_novel_obj_id])))
-            if len(self.partial_data_pool[past_novel_obj_id]) > self.cfg.TASK_SPECIFIC.GIFS.num_shots:
-                selected_idx = random.sample(self.partial_data_pool[past_novel_obj_id], k=self.cfg.TASK_SPECIFIC.GIFS.num_shots)
+            if len(self.partial_data_pool[past_novel_obj_id]) > 5:
+                selected_idx = random.sample(self.partial_data_pool[past_novel_obj_id], k=5)
                 self.partial_data_pool[past_novel_obj_id] = selected_idx
                 # print('number of pool data for past novel class {} after: {}'.format(past_novel_obj_id, len(
                 #                                                           self.partial_data_pool[
@@ -307,7 +305,7 @@ class non_fs_incremental_trainer(non_fs_sequential_GIFS_seg_trainer):
         for novel_obj_id in novel_class_idx:
             assert novel_obj_id in support_set
             for idx in support_set[novel_obj_id]:
-                novel_img_chw, mask_hw = self.continual_vanilla_train_set[idx]
+                novel_img_chw, mask_hw = self.continual_train_set[(idx, {'aug': False})]
                 img_roi, mask_roi = utils.crop_partial_img(novel_img_chw, mask_hw,
                                                            cls_id=novel_obj_id)
                 assert mask_roi.shape[0] > 0 and mask_roi.shape[1] > 0
@@ -372,7 +370,7 @@ class non_fs_incremental_trainer(non_fs_sequential_GIFS_seg_trainer):
                         # full mask
                         chosen_cls = random.choice(list(novel_class_idx))
                         idx = random.choice(support_set[chosen_cls])
-                        img_chw, mask_hw = self.continual_aug_train_set[idx]
+                        img_chw, mask_hw = self.continual_train_set[idx]
                         if False:
                             # Mask non-novel portion using pseudo labels
                             with torch.no_grad():
@@ -392,7 +390,7 @@ class non_fs_incremental_trainer(non_fs_sequential_GIFS_seg_trainer):
                             # Copy-paste augmentation from other support images
                             copy_cls = random.choice(list(novel_class_idx))
                             copy_idx = random.choice(support_set[copy_cls])
-                            copy_img_chw, copy_mask_hw = self.continual_vanilla_train_set[copy_idx]
+                            copy_img_chw, copy_mask_hw = self.continual_train_set[(copy_idx, {'aug': False})]
                             img_chw, mask_hw = utils.copy_and_paste(copy_img_chw,
                                                                     copy_mask_hw == copy_cls,
                                                                     img_chw, mask_hw, copy_cls)

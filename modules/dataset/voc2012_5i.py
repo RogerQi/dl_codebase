@@ -588,11 +588,6 @@ def get_train_set(cfg):
     ds = VOC125iReader(utils.get_dataset_root(), folding, True, True, exclude_novel=True)
     return base_set(ds, "train", cfg)
 
-def get_unaug_train_set(cfg):
-    folding = cfg.DATASET.PASCAL5i.folding
-    ds = VOC125iReader(utils.get_dataset_root(), folding, True, True, exclude_novel=True)
-    return base_set(ds, "test", cfg)
-
 def get_val_set(cfg):
     folding = cfg.DATASET.PASCAL5i.folding
     ds = VOC125iReader(utils.get_dataset_root(), folding, True, False, exclude_novel=False)
@@ -603,16 +598,7 @@ def get_train_set_vanilla_label(cfg):
     ds = VOC125iReader(utils.get_dataset_root(), folding, True, True, exclude_novel=True, vanilla_label=True)
     return base_set(ds, "train", cfg)
 
-def get_vanilla_train_set_vanilla_label(cfg):
-    folding = cfg.DATASET.PASCAL5i.folding
-    ds = VOC125iReader(utils.get_dataset_root(), folding, True, True, exclude_novel=True, vanilla_label=True)
-    return base_set(ds, "test", cfg)
-
-def get_continual_vanilla_train_set(cfg):
-    ds = VOC12SegReader(utils.get_dataset_root(), True, download=True)
-    return base_set(ds, "test", cfg) # Use test config to keep original scale of the image.
-
-def get_continual_aug_train_set(cfg):
+def get_continual_train_set(cfg):
     ds = VOC12SegReader(utils.get_dataset_root(), True, download=True)
     return base_set(ds, "train", cfg)
 

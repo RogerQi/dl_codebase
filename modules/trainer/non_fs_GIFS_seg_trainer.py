@@ -19,8 +19,7 @@ class non_fs_GIFS_seg_trainer(seg_trainer):
         super(non_fs_GIFS_seg_trainer, self).__init__(cfg, backbone_net, post_processor, criterion,
                                                dataset_module, device)
 
-        self.continual_vanilla_train_set = dataset_module.get_continual_vanilla_train_set(cfg)
-        self.continual_aug_train_set = dataset_module.get_continual_aug_train_set(cfg)
+        self.continual_train_set = dataset_module.get_continual_train_set(cfg)
         self.continual_test_set = dataset_module.get_continual_test_set(cfg)
 
         self.continual_test_loader = torch.utils.data.DataLoader(self.continual_test_set,
@@ -41,7 +40,7 @@ class non_fs_GIFS_seg_trainer(seg_trainer):
         vanilla_image_candidates = {}
         for l in testing_label_candidates:
             vanilla_image_candidates[l] = set(
-                self.continual_vanilla_train_set.dataset.get_class_map(l))
+                self.continual_train_set.dataset.get_class_map(l))
 
         # To ensure only $num_shots$ number of examples are used
         image_candidates = {}
@@ -73,7 +72,7 @@ class non_fs_GIFS_seg_trainer(seg_trainer):
                 for h in range(len(image_candidates[k])):
                     idx = image_candidates[k][h]
                     iter_cnt += 1
-                    novel_img_chw, mask_hw = self.continual_vanilla_train_set[idx]
+                    novel_img_chw, mask_hw = self.continual_train_set[(idx, {'aug': False})]
                     pixel_sum = torch.sum(mask_hw == k)
                     assert pixel_sum > 0, f"Sample {idx} does not contain class {k}"
                     # If the selected sample is bad (more than 1px) and has not been selected,
@@ -206,7 +205,7 @@ class non_fs_GIFS_seg_trainer(seg_trainer):
                 vec_list = []  # store MAP result for every image
                 assert c in support_set
                 for idx in support_set[c]:
-                    img_chw, mask_hw = self.continual_vanilla_train_set[idx]
+                    img_chw, mask_hw = self.continual_train_set[(idx, {'aug': False})]
                     # novel class. Use MAP to initialize weight
                     supp_img_bchw_tensor = img_chw.view((1,) + img_chw.shape).to(self.device)
                     supp_mask_bhw_tensor = mask_hw.view((1,) + mask_hw.shape).to(self.device)
