@@ -45,10 +45,10 @@ If you want to skip the prolonged base learning stage, you can find weights trai
 | Pascal-5-1 | TBD | TBD | [box](https://uofi.box.com/s/3b4opya1qmhztnn2mxaqjce32izvuvep) |
 | Pascal-5-2 | TBD | TBD | [box](https://uofi.box.com/s/s9tb3jcl2n1vi73iu2e482to1txfhyhs) |
 | Pascal-5-3 | TBD | TBD | [box](https://uofi.box.com/s/1fhmkne8pm8l8ucsg4uazlisioito8f1) |
-| COCO-20-0  | TBD | TBD | TBD |
+| COCO-20-0  | TBD | TBD | [box](https://uofi.box.com/s/wnk7rscz9py9hkufqr78d130s8o3mgtx) |
 | COCO-20-1  | TBD | TBD | [box](https://uofi.box.com/s/ccrosqwpks20ik5u50btxyfhf5776mjn) |
-| COCO-20-2  | TBD | TBD | TBD |
-| COCO-20-3  | TBD | TBD | TBD |
+| COCO-20-2  | TBD | TBD | [box](https://uofi.box.com/s/83fgz1jxjrgxyb1i6ff4f8oowubr74vb) |
+| COCO-20-3  | TBD | TBD | [box](https://uofi.box.com/s/y8hlhvzhseomtj6fjutyylt68v8jl1e6) |
 
 After base learning stage, it will generate a weight named `GIFS_pascal_voc_split3_final.pt` at the project root. To perform incremental learning and testing, the command line to be invoked is
 
