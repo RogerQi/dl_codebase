@@ -1,18 +1,16 @@
 import numpy as np
 from copy import deepcopy
-from .non_fs_GIFS_seg_trainer import non_fs_GIFS_seg_trainer
+from .GIFS_seg_trainer import GIFS_seg_trainer
 
 
 def harmonic_mean(base_iou, novel_iou):
     return 2 / (1. / base_iou + 1. / novel_iou)
 
 
-class non_fs_sequential_GIFS_seg_trainer(non_fs_GIFS_seg_trainer):
+class non_fs_sequential_GIFS_seg_trainer(GIFS_seg_trainer):
     def __init__(self, cfg, backbone_net, post_processor, criterion, dataset_module, device):
         super(non_fs_sequential_GIFS_seg_trainer, self).__init__(cfg, backbone_net, post_processor,
                                                           criterion, dataset_module, device)
-
-        self.continual_aug_train_set = dataset_module.get_continual_aug_train_set(cfg)
 
         self.partial_data_pool = {}
 
@@ -121,8 +119,6 @@ class non_fs_sequential_GIFS_seg_trainer(non_fs_GIFS_seg_trainer):
                 base_iou_list.append(classwise_iou[i])
             else:
                 continue
-        self.test_base_iou.append(np.mean(base_iou_list))
-        self.test_novel_iou.append(np.mean(novel_iou_list))
 ###############################################################
 
         # Restore weights
