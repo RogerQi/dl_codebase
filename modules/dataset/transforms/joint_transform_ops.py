@@ -76,6 +76,9 @@ class joint_random_scale_crop:
 
 @joint_transforms_registry.register
 class joint_keep_ratio_resize:
+    """Resize such that the longest edge is crop_size,
+        followed by center crop with 0 padding on the short edge.
+    """
     def __init__(self, transforms_cfg):
         self.output_H, self.output_W = transforms_cfg.TRANSFORMS_DETAILS.crop_size
         assert self.output_H == self.output_W
@@ -101,11 +104,39 @@ class joint_keep_ratio_resize:
 class joint_center_crop:
     def __init__(self, transforms_cfg):
         self.output_H, self.output_W = transforms_cfg.TRANSFORMS_DETAILS.crop_size
+        assert self.output_H == self.output_W
 
     def __call__(self, img, target):
         assert img.shape[-2:] == target.shape[-2:]
         img = tr_F.center_crop(img, (self.output_H, self.output_W))
         target = tr_F.center_crop(img, (self.output_H, self.output_W))
+        return (img, target)
+
+@joint_transforms_registry.register
+class joint_resize_center_crop:
+    """First resize the image's shortest edge to crop_size. Then perform center crop
+
+    This is consistent with various incremental segmentation papers' validation implementations
+        - https://github.com/clovaai/SSUL/blob/main/main.py#L114
+        - https://github.com/arthurdouillard/CVPR2021_PLOP/blob/main/run.py#L51
+    """
+    def __init__(self, transforms_cfg):
+        self.output_H, self.output_W = transforms_cfg.TRANSFORMS_DETAILS.crop_size
+        assert self.output_H == self.output_W
+
+    def __call__(self, img, target):
+        assert img.shape[-2:] == target.shape[-2:]
+        img = tr_F.resize(img, (self.output_H, self.output_W))
+        if len(target.shape) == 2:
+            # HxW?
+            target = target.reshape((1,) + target.shape)
+            target = tr_F.resize(target, (self.output_H, self.output_W), interpolation=torchvision.transforms.InterpolationMode.NEAREST)
+            target = tr_F.center_crop(target, (self.output_H, self.output_W))
+            target = target.reshape(target.shape[1:])
+        else:
+            assert len(target.shape) == 3
+            target = tr_F.resize(target, (self.output_H, self.output_W), interpolation=torchvision.transforms.InterpolationMode.NEAREST)
+            target = tr_F.center_crop(target, (self.output_H, self.output_W))
         return (img, target)
 
 @joint_transforms_registry.register
