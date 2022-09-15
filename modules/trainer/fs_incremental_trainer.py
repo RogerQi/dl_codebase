@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
+import math
 from tqdm import tqdm, trange
 from backbone.deeplabv3_renorm import BatchRenorm2d
 
@@ -33,6 +34,81 @@ class kd_criterion(nn.Module):
         return -torch.mean(element_wise_loss)
 
 memory_bank_size = 500
+
+def features_distillation8( 
+    list_attentions_a,
+    list_attentions_b,
+    nb_current_classes=16,
+    nb_new_classes=1
+):
+    loss = torch.tensor(0.).to(list_attentions_a[0].device)
+    # list_attentions_a = list_attentions_a[:-1]
+    # list_attentions_b = list_attentions_b[:-1]
+    for i, (a, b) in enumerate(zip(list_attentions_a, list_attentions_b)):
+        n, c, h, w = a.shape
+        layer_loss = torch.tensor(0.).to(a.device)
+    
+        assert a.shape == b.shape
+
+        a = a ** 2
+        b = b ** 2
+        a_affinity_4 = F.avg_pool2d(a, (4, 4), stride=1, padding=2)
+        b_affinity_4 = F.avg_pool2d(b, (4, 4), stride=1, padding=2)
+        a_affinity_8 = F.avg_pool2d(a, (8, 8), stride=1, padding=4)
+        b_affinity_8 = F.avg_pool2d(b, (8, 8), stride=1, padding=4)
+        a_affinity_12 = F.avg_pool2d(a, (12, 12), stride=1, padding=6)
+        b_affinity_12 = F.avg_pool2d(b, (12, 12), stride=1, padding=6)
+        a_affinity_16 = F.avg_pool2d(a, (16, 16), stride=1, padding=8)
+        b_affinity_16 = F.avg_pool2d(b, (16, 16), stride=1, padding=8)
+        a_affinity_20 = F.avg_pool2d(a, (20, 20), stride=1, padding=10)
+        b_affinity_20 = F.avg_pool2d(b, (20, 20), stride=1, padding=10)
+        a_affinity_24 = F.avg_pool2d(a, (24, 24), stride=1, padding=12)
+        b_affinity_24 = F.avg_pool2d(b, (24, 24), stride=1, padding=12)
+
+        layer_loss = torch.frobenius_norm((a_affinity_4 - b_affinity_4).view(a.shape[0], -1), dim=-1).mean() + \
+                    torch.frobenius_norm((a_affinity_8 - b_affinity_8).view(a.shape[0], -1), dim=-1).mean() + \
+                    torch.frobenius_norm((a_affinity_16 - b_affinity_16).view(a.shape[0], -1), dim=-1).mean() + \
+                    torch.frobenius_norm((a_affinity_20 - b_affinity_20).view(a.shape[0], -1), dim=-1).mean() + \
+                    torch.frobenius_norm((a_affinity_24 - b_affinity_24).view(a.shape[0], -1), dim=-1).mean() + \
+                    torch.frobenius_norm((a_affinity_12 - b_affinity_12).view(a.shape[0], -1), dim=-1).mean()
+        layer_loss = layer_loss / 6.
+            
+        # pod_factor = 0.0005 # cityscapes
+        pod_factor = 0.0001 # voc
+      
+        loss = loss + layer_loss.mean() * pod_factor
+
+
+    return loss / len(list_attentions_a)
+
+
+def features_distillation_channel( 
+    list_attentions_a,
+    list_attentions_b,
+    nb_current_classes=16,
+    nb_new_classes=1
+):
+    loss = torch.tensor(0.).to(list_attentions_a[0].device)
+    list_attentions_a = list_attentions_a[:-1]
+    list_attentions_b = list_attentions_b[:-1]
+    for i, (a, b) in enumerate(zip(list_attentions_a, list_attentions_b)):
+        n, c, h, w = a.shape
+        layer_loss = torch.tensor(0.).to(a.device)
+    
+        assert a.shape == b.shape
+
+        a = a ** 2
+        b = b ** 2
+
+        a_p = F.avg_pool2d(a.permute(0, 2, 1, 3), (3, 1), stride=1, padding=(1, 0))
+        b_p = F.avg_pool2d(b.permute(0, 2, 1, 3), (3, 1), stride=1, padding=(1, 0))
+        
+        layer_loss = torch.frobenius_norm((a_p - b_p).view(a.shape[0], -1), dim=-1).mean()
+
+        pod_factor = 0.0001 #voc
+        loss = loss + layer_loss.mean() * pod_factor
+
+    return loss / len(list_attentions_a)
 
 class fs_incremental_trainer(sequential_GIFS_seg_trainer):
     def __init__(self, cfg, backbone_net, post_processor, criterion, dataset_module, device):
@@ -192,6 +268,11 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         elif self.cfg.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat == 'CAS':
             other_prob = 1. / total_classes
             selected_novel_prob = 1. / total_classes
+            num_existing_objects = 1
+            num_novel_objects = 1
+        elif self.cfg.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat == 'HALF_HALF':
+            other_prob = 0.5
+            selected_novel_prob = 0.5
             num_existing_objects = 1
             num_novel_objects = 1
         else:
@@ -357,27 +438,37 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                         mask_list.append(mask_hw)
                 data_bchw = torch.stack(image_list).to(self.device).detach()
                 target_bhw = torch.stack(mask_list).to(self.device).detach()
-                feature = self.backbone_net(data_bchw)
+                feature, intermediate_outputs = self.backbone_net(data_bchw, return_intermediate=True)
                 ori_spatial_res = data_bchw.shape[-2:]
                 output = self.post_processor(feature, ori_spatial_res, scale_factor=10)
+                loss = self.criterion(output, target_bhw)
 
                 # L2 regularization on feature extractor
                 with torch.no_grad():
                     # self.vanilla_backbone_net for the base version
-                    ori_feature = self.prv_backbone_net(data_bchw)
+                    ori_feature, ori_intermediate_outputs = self.prv_backbone_net(data_bchw, return_intermediate=True)
                     ori_logit = self.prv_post_processor(ori_feature, ori_spatial_res, scale_factor=10)
 
-                loss = self.criterion(output, target_bhw)
+                if False:
+                    # ASPP head output
+                    # Intermediate output from ResNet backbone
+                    old_reg_features = ori_intermediate_outputs + [ori_feature]
+                    new_reg_features = intermediate_outputs + [feature]
+                    # sem_logits_small is logit right before softmax/sigmoid
+                    reg_loss = features_distillation8(old_reg_features, new_reg_features)
+                    reg_loss += features_distillation_channel(old_reg_features, new_reg_features)
 
-                # Feature extractor regularization + classifier regularization
-                regularization_loss = l2_criterion(feature, ori_feature)
-                regularization_loss = regularization_loss * self.cfg.TASK_SPECIFIC.GIFS.feature_reg_lambda # hyperparameter lambda
-                loss = loss + regularization_loss
-                # PD Loss from PIFS
-                with torch.no_grad():
-                    distill_output = post_processor_distillation_ref(ori_feature, ori_spatial_res, scale_factor=10)
-                clf_loss = my_kd_criterion(output, distill_output) * self.cfg.TASK_SPECIFIC.GIFS.classifier_reg_lambda
-                loss = loss + clf_loss
+                    loss = loss + reg_loss
+                else:
+                    # Feature extractor regularization + classifier regularization
+                    regularization_loss = l2_criterion(feature, ori_feature)
+                    regularization_loss = regularization_loss * self.cfg.TASK_SPECIFIC.GIFS.feature_reg_lambda # hyperparameter lambda
+                    loss = loss + regularization_loss
+                    # PD Loss from PIFS
+                    with torch.no_grad():
+                        distill_output = post_processor_distillation_ref(ori_feature, ori_spatial_res, scale_factor=10)
+                    clf_loss = my_kd_criterion(output, distill_output) * self.cfg.TASK_SPECIFIC.GIFS.classifier_reg_lambda
+                    loss = loss + clf_loss
 
                 optimizer.zero_grad() # reset gradient
                 loss.backward()
