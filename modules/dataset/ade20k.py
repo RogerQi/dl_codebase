@@ -1,63 +1,100 @@
 import os
-import json
-from PIL import Image
 import numpy as np
 import torch
-import torchvision
-from torchvision import datasets, transforms
-
-import utils
+from PIL import Image
+from copy import deepcopy
+from torchvision import datasets
 from .baseset import base_set
 
+import utils
+
 class ADE20KSegReader(datasets.vision.VisionDataset):
-    '''
-    Coarse grain semantic segmentation dataset from the 2016 ADE20K challenge.
 
-    Data can be grabbed from http://data.csail.mit.edu/places/ADEchallenge/ADEChallengeData2016.zip
-    '''
-
-    CLASS_NAMES_LIST = ["wall", "building", "sky", "floor", "tree", "ceiling", "road", "bed", "windowpane", "grass", "cabinet", "sidewalk", "person", "earth", "door", "table", "mountain", "plant", "curtain", "chair", "car", "water", "painting", "sofa", "shelf", "house", "sea", "mirror", "rug", "field", "armchair", "seat", "fence", "desk", "rock", "wardrobe", "lamp", "bathtub", "railing", "cushion", "base", "box", "column", "signboard", "chest", "counter", "sand", "sink", "skyscraper", "fireplace", "refrigerator", "grandstand", "path", "stairs", "runway", "case", "pool", "pillow", "screen", "stairway", "river", "bridge", "bookcase", "blind", "coffee", "toilet", "flower", "book", "hill", "bench", "countertop", "stove", "palm", "kitchen", "computer", "swivel", "boat", "bar", "arcade", "hovel", "bus", "towel", "light", "truck", "tower", "chandelier", "awning", "streetlight", "booth", "television", "airplane", "dirt", "apparel", "pole", "land", "bannister", "escalator", "ottoman", "bottle", "buffet", "poster", "stage", "van", "ship", "fountain", "conveyer", "canopy", "washer", "plaything", "swimming", "stool", "barrel", "basket", "waterfall", "tent", "bag", "minibike", "cradle", "oven", "ball", "food", "step", "tank", "trade", "microwave", "pot", "animal", "bicycle", "lake", "dishwasher", "screen", "blanket", "sculpture", "hood", "sconce", "vase", "traffic", "tray", "ashcan", "fan", "pier", "crt", "plate", "monitor", "bulletin", "shower", "radiator", "glass", "clock", "flag"]
+    CLASS_NAMES_LIST = [
+        "void", "wall", "building", "sky", "floor", "tree", "ceiling", "road", "bed ", "windowpane",
+        "grass", "cabinet", "sidewalk", "person", "earth", "door", "table", "mountain", "plant",
+        "curtain", "chair", "car", "water", "painting", "sofa", "shelf", "house", "sea", "mirror",
+        "rug", "field", "armchair", "seat", "fence", "desk", "rock", "wardrobe", "lamp", "bathtub",
+        "railing", "cushion", "base", "box", "column", "signboard", "chest of drawers", "counter",
+        "sand", "sink", "skyscraper", "fireplace", "refrigerator", "grandstand", "path", "stairs",
+        "runway", "case", "pool table", "pillow", "screen door", "stairway", "river", "bridge",
+        "bookcase", "blind", "coffee table", "toilet", "flower", "book", "hill", "bench", "countertop",
+        "stove", "palm", "kitchen island", "computer", "swivel chair", "boat", "bar", "arcade machine",
+        "hovel", "bus", "towel", "light", "truck", "tower", "chandelier", "awning", "streetlight",
+        "booth", "television receiver", "airplane", "dirt track", "apparel", "pole", "land",
+        "bannister", "escalator", "ottoman", "bottle", "buffet", "poster", "stage", "van", "ship",
+        "fountain", "conveyer belt", "canopy", "washer", "plaything", "swimming pool", "stool",
+        "barrel", "basket", "waterfall", "tent", "bag", "minibike", "cradle", "oven", "ball", "food",
+        "step", "tank", "trade name", "microwave", "pot", "animal", "bicycle", "lake", "dishwasher",
+        "screen", "blanket", "sculpture", "hood", "sconce", "vase", "traffic light", "tray", "ashcan",
+        "fan", "pier", "crt screen", "plate", "monitor", "bulletin board", "shower", "radiator",
+        "glass", "clock", "flag"
+    ]
 
     def __init__(self, root, train=True):
-        '''
-        Initialize and load the ADE20K annotation file into memory.
-        '''
         super(ADE20KSegReader, self).__init__(root, None, None, None)
+
         self.train = train
-        self.base_dir = os.path.join(root, "ade20k_coarse")
+        self.base_dir = os.path.join(root, "ADEChallengeData2016")
 
-        if train:
-            dataset_json_path = os.path.join(self.base_dir, "training.odgt")
+        if self.train:
+            split = 'training'
         else:
-            dataset_json_path = os.path.join(self.base_dir, "validation.odgt")
+            split = 'validation'
 
-        self.ds = [json.loads(x.rstrip()) for x in open(dataset_json_path, 'r')]
-    
-    def __getitem__(self, idx: int):
+        annotation_folder = os.path.join(self.base_dir, 'annotations', split)
+        image_folder = os.path.join(self.base_dir, 'images', split)
+
+        fnames = sorted(os.listdir(image_folder))
+        self.images = [os.path.join(image_folder, x) for x in fnames]
+        self.masks = [os.path.join(annotation_folder, x[:-3] + "png") for x in fnames]
+
+        assert len(self.images) == len(self.masks)
+
+        self.class_map = {}
+
+        if self.train:
+            class_map_dir = "metadata/ade20k/train"
+        else:
+            class_map_dir = "metadata/ade20k/val"
+
+        for c in range(1, 151):
+            class_map_path = os.path.join(class_map_dir, str(c) + ".txt")
+            class_idx_list = list(np.loadtxt(class_map_path, dtype=int))
+            self.class_map[c] = class_idx_list
+
+    def __getitem__(self, index):
         """
         Args:
-            key (int): key
-
+            index (int): Index
         Returns:
-            ret_dict
+            tuple: (image, target) where target is the image segmentation.
         """
-        img_path = os.path.join(self.base_dir, self.ds[idx]['fpath_img'])
-        seg_path = os.path.join(self.base_dir, self.ds[idx]['fpath_segm'])
-        raw_img = Image.open(img_path).convert('RGB')
-        segm = Image.open(seg_path)
-        assert(segm.mode == "L")
-        assert(raw_img.size[0] == segm.size[0])
-        assert(raw_img.size[1] == segm.size[1])
-        seg_mask = torch.tensor(np.array(segm, dtype = np.uint8), dtype = torch.int64)
-        # ADE20K ignores background labels
-        # https://github.com/CSAILVision/semantic-segmentation-pytorch/blob/master/mit_semseg/dataset.py#L61
-        # https://github.com/open-mmlab/mmsegmentation/blob/54bd4bdd82c7aa1c0ea7220b5a0672a8326e4134/mmseg/datasets/ade.py#L17
-        seg_mask = seg_mask - 1
-        # seg_mask = self.label_unifier(seg_mask)
-        return (raw_img, seg_mask)
+        img = Image.open(self.images[index]).convert('RGB')
+        target = np.array(Image.open(self.masks[index])).astype(np.int)
+
+        target[target == 255] = -1
+
+        return img, torch.tensor(target).long()
 
     def __len__(self):
-        return len(self.ds)
+        return len(self.images)
+    
+    def get_class_map(self, class_id):
+        """
+        Given a class label id (e.g., 2), return a list of all images in
+        the dataset containing at least one pixel of the class.
+
+        Parameters:
+            - class_id: an integer representing class
+
+        Return:
+            - a list of all images in the dataset containing at least one pixel of the class
+        """
+        return deepcopy(self.class_map[class_id])
+    
+    def get_label_range(self):
+        return [i for i in range(1, 151)]
 
 def get_train_set(cfg):
     ds = ADE20KSegReader(utils.get_dataset_root(), True)
