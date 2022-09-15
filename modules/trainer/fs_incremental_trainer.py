@@ -333,6 +333,8 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         assert self.prv_backbone_net is not None
         assert self.prv_post_processor is not None
 
+        scaler = torch.cuda.amp.GradScaler()
+
         print(f"Adapting to novel id {novel_class_idx}")
 
         if self.context_aware_prob > 0:
@@ -438,40 +440,44 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                         mask_list.append(mask_hw)
                 data_bchw = torch.stack(image_list).to(self.device).detach()
                 target_bhw = torch.stack(mask_list).to(self.device).detach()
-                feature, intermediate_outputs = self.backbone_net(data_bchw, return_intermediate=True)
-                ori_spatial_res = data_bchw.shape[-2:]
-                output = self.post_processor(feature, ori_spatial_res, scale_factor=10)
-                loss = self.criterion(output, target_bhw)
 
-                # L2 regularization on feature extractor
-                with torch.no_grad():
-                    # self.vanilla_backbone_net for the base version
-                    ori_feature, ori_intermediate_outputs = self.prv_backbone_net(data_bchw, return_intermediate=True)
-                    ori_logit = self.prv_post_processor(ori_feature, ori_spatial_res, scale_factor=10)
+                # TODO: mixed-precision training doesn't seem to reduce GPU memory now?
+                with torch.cuda.amp.autocast(enabled=True):
+                    feature, intermediate_outputs = self.backbone_net(data_bchw, return_intermediate=True)
+                    ori_spatial_res = data_bchw.shape[-2:]
+                    output = self.post_processor(feature, ori_spatial_res, scale_factor=10)
+                    loss = self.criterion(output, target_bhw)
 
-                if False:
-                    # ASPP head output
-                    # Intermediate output from ResNet backbone
-                    old_reg_features = ori_intermediate_outputs + [ori_feature]
-                    new_reg_features = intermediate_outputs + [feature]
-                    # sem_logits_small is logit right before softmax/sigmoid
-                    reg_loss = features_distillation8(old_reg_features, new_reg_features)
-                    reg_loss += features_distillation_channel(old_reg_features, new_reg_features)
-
-                    loss = loss + reg_loss
-                else:
-                    # Feature extractor regularization + classifier regularization
-                    regularization_loss = l2_criterion(feature, ori_feature)
-                    regularization_loss = regularization_loss * self.cfg.TASK_SPECIFIC.GIFS.feature_reg_lambda # hyperparameter lambda
-                    loss = loss + regularization_loss
-                    # PD Loss from PIFS
+                    # L2 regularization on feature extractor
                     with torch.no_grad():
-                        distill_output = post_processor_distillation_ref(ori_feature, ori_spatial_res, scale_factor=10)
-                    clf_loss = my_kd_criterion(output, distill_output) * self.cfg.TASK_SPECIFIC.GIFS.classifier_reg_lambda
-                    loss = loss + clf_loss
+                        # self.vanilla_backbone_net for the base version
+                        ori_feature, ori_intermediate_outputs = self.prv_backbone_net(data_bchw, return_intermediate=True)
+                        ori_logit = self.prv_post_processor(ori_feature, ori_spatial_res, scale_factor=10)
+
+                    if False:
+                        # ASPP head output
+                        # Intermediate output from ResNet backbone
+                        old_reg_features = ori_intermediate_outputs + [ori_feature]
+                        new_reg_features = intermediate_outputs + [feature]
+                        # sem_logits_small is logit right before softmax/sigmoid
+                        reg_loss = features_distillation8(old_reg_features, new_reg_features)
+                        reg_loss += features_distillation_channel(old_reg_features, new_reg_features)
+
+                        loss = loss + reg_loss
+                    else:
+                        # Feature extractor regularization + classifier regularization
+                        regularization_loss = l2_criterion(feature, ori_feature)
+                        regularization_loss = regularization_loss * self.cfg.TASK_SPECIFIC.GIFS.feature_reg_lambda # hyperparameter lambda
+                        loss = loss + regularization_loss
+                        # PD Loss from PIFS
+                        with torch.no_grad():
+                            distill_output = post_processor_distillation_ref(ori_feature, ori_spatial_res, scale_factor=10)
+                        clf_loss = my_kd_criterion(output, distill_output) * self.cfg.TASK_SPECIFIC.GIFS.classifier_reg_lambda
+                        loss = loss + clf_loss
 
                 optimizer.zero_grad() # reset gradient
-                loss.backward()
-                optimizer.step()
+                scaler.scale(loss).backward() # loss.backward()
+                scaler.step(optimizer) # optimizer.step()
+                scaler.update()
                 scheduler.step()
                 t.set_description_str("Loss: {:.4f}".format(loss.item()))
