@@ -119,6 +119,8 @@ class GIFS_seg_trainer(seg_trainer):
                     base_iou_list.append(classwise_iou[i])
             base_iou = np.mean(base_iou_list)
             novel_iou = np.mean(novel_iou_list)
+            test_base_iou_list.append(base_iou)
+            test_novel_iou_list.append(novel_iou)
             print("Base IoU: {:.4f} Novel IoU: {:.4f} Total IoU: {:.4f}".format(base_iou, novel_iou,
                                                                                 np.mean(
                                                                                     classwise_iou)))
