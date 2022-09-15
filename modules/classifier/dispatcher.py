@@ -43,5 +43,9 @@ def dispatcher(cfg, feature_shape, num_classes = -1):
         import classifier.plain_c1 as plain_c1
         plain_c1_head = plain_c1.plain_c1(cfg, feature_shape, num_classes)
         return plain_c1_head
+    elif classifier_name == "seg_cos_decoder":
+        import classifier.seg_cos_decoder as seg_cos_decoder
+        seg_cos_decoder_head = seg_cos_decoder.seg_cos_decoder(cfg, feature_shape, num_classes)
+        return seg_cos_decoder_head
     else:
         raise NotImplementedError
