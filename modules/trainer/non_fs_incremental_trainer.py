@@ -35,7 +35,7 @@ class kd_criterion(nn.Module):
         return -torch.mean(element_wise_loss)
 
 
-memory_bank_size = 500
+memory_bank_size = 300
 
 
 class non_fs_incremental_trainer(non_fs_sequential_GIFS_seg_trainer):
@@ -216,7 +216,7 @@ class non_fs_incremental_trainer(non_fs_sequential_GIFS_seg_trainer):
             for i in range(num_existing_objects):
                 selected_class = np.random.choice(candidate_classes)
                 selected_sample = random.choice(self.partial_data_pool[selected_class])
-                img_chw, mask_hw = selected_sample
+                full_img_chw, full_mask_hw, img_chw, mask_hw = selected_sample
                 syn_img_chw, syn_mask_hw = utils.copy_and_paste(img_chw, mask_hw, syn_img_chw,
                                                                 syn_mask_hw, selected_class)
 
@@ -224,7 +224,7 @@ class non_fs_incremental_trainer(non_fs_sequential_GIFS_seg_trainer):
         if torch.rand(1) < selected_novel_prob:
             for i in range(num_novel_objects):
                 selected_sample = random.choice(self.partial_data_pool[novel_obj_id])
-                img_chw, mask_hw = selected_sample
+                full_img_chw, full_mask_hw, img_chw, mask_hw = selected_sample
                 syn_img_chw, syn_mask_hw = utils.copy_and_paste(img_chw, mask_hw, syn_img_chw,
                                                                 syn_mask_hw, novel_obj_id)
 
@@ -266,6 +266,8 @@ class non_fs_incremental_trainer(non_fs_sequential_GIFS_seg_trainer):
         assert self.prv_backbone_net is not None
         assert self.prv_post_processor is not None
 
+        scaler = torch.cuda.amp.GradScaler()
+
         print(f"Adapting to novel id {novel_class_idx}")
 
         if self.context_aware_prob > 0:
@@ -291,15 +293,47 @@ class non_fs_incremental_trainer(non_fs_sequential_GIFS_seg_trainer):
 
         ################################################################
         for past_novel_obj_id in self.partial_data_pool.keys():
-            # selected_idx = []
-            # print('number of pool data for past novel class {} before: {}'.format(past_novel_obj_id, len(
-            #     self.partial_data_pool[past_novel_obj_id])))
-            if len(self.partial_data_pool[past_novel_obj_id]) > 5:
-                selected_idx = random.sample(self.partial_data_pool[past_novel_obj_id], k=5)
-                self.partial_data_pool[past_novel_obj_id] = selected_idx
-                # print('number of pool data for past novel class {} after: {}'.format(past_novel_obj_id, len(
-                #                                                           self.partial_data_pool[
-                #                                                               past_novel_obj_id])))
+            novel_mem_size = 5
+            if len(self.partial_data_pool[past_novel_obj_id]) > novel_mem_size:
+                if True:
+                    selected_idx = random.sample(self.partial_data_pool[past_novel_obj_id], k=5)
+                    self.partial_data_pool[past_novel_obj_id] = selected_idx
+                else:        
+                    similarity_list = []
+
+                    mean_weight = self.prv_post_processor.pixel_classifier.class_mat.weight.data[past_novel_obj_id]
+                    mean_weight = mean_weight.reshape((-1))
+                    mean_weight = mean_weight.cpu().unsqueeze(0)
+
+                    # Maintain a m-size heap to store the top m images of each class
+                    for i in tqdm(range(len(self.partial_data_pool[past_novel_obj_id]))):
+                        full_img_chw, full_mask_hw, img_roi, mask_roi = self.partial_data_pool[past_novel_obj_id][i]
+                        img_tensor = torch.stack([full_img_chw]).to(self.device)
+                        mask_tensor = torch.stack([full_mask_hw]).to(self.device).long()
+                        with torch.no_grad():
+                            img_feature = self.prv_backbone_net(img_tensor)
+                            img_weight = utils.masked_average_pooling(mask_tensor == 1, img_feature,
+                                                                        True)
+                        img_weight = img_weight.cpu().unsqueeze(0)
+                        similarity = F.cosine_similarity(img_weight, mean_weight).item()
+                        similarity_list.append((similarity, i))
+
+                    similarity_list = sorted(similarity_list, key=lambda x: x[0])
+            
+                    interval_size = len(similarity_list) // novel_mem_size
+                    reduced_list = []
+                    for i in range(novel_mem_size):
+                        if True:
+                            sampled_idx = len(similarity_list) - 1 - i
+                        else:
+                            int_start = interval_size * i
+                            assert int_start < len(similarity_list)
+                            int_end = min(interval_size * (i + 1), len(similarity_list))
+                            sample_tuple = similarity_list[
+                                np.random.randint(low=int_start, high=int_end)]
+                            sampled_idx = sample_tuple[1]  # first element is similarity
+                        reduced_list.append(self.partial_data_pool[past_novel_obj_id][sampled_idx])
+                    self.partial_data_pool[past_novel_obj_id] = reduced_list
         ################################################################
 
         for novel_obj_id in novel_class_idx:
@@ -313,7 +347,7 @@ class non_fs_incremental_trainer(non_fs_sequential_GIFS_seg_trainer):
                 if novel_obj_id not in self.partial_data_pool:
                     self.partial_data_pool[novel_obj_id] = []
 
-                self.partial_data_pool[novel_obj_id].append((img_roi, mask_roi))
+                self.partial_data_pool[novel_obj_id].append((novel_img_chw, mask_hw==novel_obj_id, img_roi, mask_roi))
             print('number of pool data for current class {}: {}'.format(novel_obj_id, len(
                 self.partial_data_pool[novel_obj_id])))
 
@@ -359,72 +393,96 @@ class non_fs_incremental_trainer(non_fs_sequential_GIFS_seg_trainer):
             for iter_i in t:
                 image_list = []
                 mask_list = []
+                fully_labeled_flag = []
+                partial_positive_idx = []
                 for _ in range(batch_size):
-                    if True:
+                    if torch.rand(1) < 0.5:
                         # synthesis
                         novel_obj_id = random.choice(novel_class_idx)
                         img_chw, mask_hw = self.synthesizer_sample(novel_obj_id)
                         image_list.append(img_chw)
                         mask_list.append(mask_hw)
+                        fully_labeled_flag.append(True)
                     else:
-                        # full mask
+                        # directly use partially-annotated smaples
                         chosen_cls = random.choice(list(novel_class_idx))
                         idx = random.choice(support_set[chosen_cls])
                         img_chw, mask_hw = self.continual_train_set[idx]
-                        if False:
-                            # Mask non-novel portion using pseudo labels
-                            with torch.no_grad():
-                                data_bchw = img_chw.to(self.device)
-                                data_bchw = data_bchw.view((1,) + data_bchw.shape)
-                                feature = self.prv_backbone_net(data_bchw)
-                                ori_spatial_res = data_bchw.shape[-2:]
-                                output = self.prv_post_processor(feature, ori_spatial_res,
-                                                                 scale_factor=10)
-                            tmp_target_hw = output.max(dim=1)[1].cpu()[0]
-                            for novel_obj_id in support_set.keys():
-                                novel_mask = torch.zeros_like(mask_hw)
-                                novel_mask = torch.logical_or(novel_mask, mask_hw == novel_obj_id)
-                            tmp_target_hw[novel_mask] = mask_hw[novel_mask]
-                            mask_hw = tmp_target_hw
-                        if False:
-                            # Copy-paste augmentation from other support images
-                            copy_cls = random.choice(list(novel_class_idx))
-                            copy_idx = random.choice(support_set[copy_cls])
-                            copy_img_chw, copy_mask_hw = self.continual_train_set[(copy_idx, {'aug': False})]
-                            img_chw, mask_hw = utils.copy_and_paste(copy_img_chw,
-                                                                    copy_mask_hw == copy_cls,
-                                                                    img_chw, mask_hw, copy_cls)
+                        mask_hw[mask_hw != chosen_cls] = 0
+                        mask_hw[mask_hw == chosen_cls] = 1
+                        # MiB
                         image_list.append(img_chw)
                         mask_list.append(mask_hw)
+                        fully_labeled_flag.append(False)
+                        partial_positive_idx.append(chosen_cls)
+                partial_positive_idx = torch.tensor(partial_positive_idx)
+                fully_labeled_flag = torch.tensor(fully_labeled_flag)
                 data_bchw = torch.stack(image_list).to(self.device).detach()
-                target_bhw = torch.stack(mask_list).to(self.device).detach()
-                feature = self.backbone_net(data_bchw)
-                ori_spatial_res = data_bchw.shape[-2:]
-                output = self.post_processor(feature, ori_spatial_res, scale_factor=10)
+                target_bhw = torch.stack(mask_list).to(self.device).detach().long()
 
-                # L2 regularization on feature extractor
-                with torch.no_grad():
-                    # self.vanilla_backbone_net for the base version
-                    ori_feature = self.prv_backbone_net(data_bchw)
-                    ori_logit = self.prv_post_processor(ori_feature, ori_spatial_res,
-                                                        scale_factor=10)
+                with torch.cuda.amp.autocast(enabled=True):
+                    feature, intermediate_outputs = self.backbone_net(data_bchw, return_intermediate=True)
+                    ori_spatial_res = data_bchw.shape[-2:]
+                    output = self.post_processor(feature, ori_spatial_res, scale_factor=10)
 
-                loss = self.criterion(output, target_bhw)
+                    if True:
+                        # CE loss on all fully-labeled images
+                        output_logit_bchw = F.softmax(output, dim=1)
+                        output_logit_bchw = torch.log(output_logit_bchw)
+                        loss = F.nll_loss(output_logit_bchw[fully_labeled_flag], target_bhw[fully_labeled_flag], ignore_index=-1)
 
-                # Feature extractor regularization + classifier regularization
-                regularization_loss = l2_criterion(feature, ori_feature)
-                regularization_loss = regularization_loss * self.cfg.TASK_SPECIFIC.GIFS.feature_reg_lambda  # hyperparameter lambda
-                loss = loss + regularization_loss
-                # PD Loss from PIFS
-                with torch.no_grad():
-                    distill_output = post_processor_distillation_ref(ori_feature, ori_spatial_res,
-                                                                     scale_factor=10)
-                clf_loss = my_kd_criterion(output,
-                                           distill_output) * self.cfg.TASK_SPECIFIC.GIFS.classifier_reg_lambda
-                loss = loss + clf_loss
+                        # MiB loss (modified CE) on partially-labeled images
+                        if len(partial_positive_idx) > 0:
+                            partial_labeled_flag = torch.logical_not(fully_labeled_flag)
+                            output_logit_bchw = F.softmax(output[partial_labeled_flag], dim=1)
+                            # Reduce to 0/1 using MiB for NLL loss
+                            assert output_logit_bchw.shape[0] == len(partial_positive_idx)
+                            fg_prob_list = []
+                            bg_prob_list = []
+                            for b in range(output_logit_bchw.shape[0]):
+                                fg_prob_hw = output_logit_bchw[b,partial_positive_idx[b]]
+                                bg_prob_chw = output_logit_bchw[b,torch.arange(output_logit_bchw.shape[1]) != partial_positive_idx[b]]
+                                bg_prob_hw = torch.sum(bg_prob_chw, dim=0)
+                                fg_prob_list.append(fg_prob_hw)
+                                bg_prob_list.append(bg_prob_hw)
+                            fg_prob_map = torch.stack(fg_prob_list)
+                            bg_prob_map = torch.stack(bg_prob_list)
+                            reduced_output_bchw = torch.stack([bg_prob_map, fg_prob_map], dim=1)
+                            reduced_logit_bchw = torch.log(reduced_output_bchw)
+                            loss = loss + F.nll_loss(reduced_logit_bchw, target_bhw[partial_labeled_flag], ignore_index=-1)
+                    else:
+                        loss = self.criterion(output, target_bhw)
 
-                optimizer.zero_grad()  # reset gradient
-                loss.backward()
-                optimizer.step()
+                    # L2 regularization on feature extractor
+                    with torch.no_grad():
+                        # self.vanilla_backbone_net for the base version
+                        ori_feature, ori_intermediate_outputs = self.prv_backbone_net(data_bchw, return_intermediate=True)
+                        ori_logit = self.prv_post_processor(ori_feature, ori_spatial_res, scale_factor=10)
+
+                    if False:
+                        # ASPP head output
+                        # Intermediate output from ResNet backbone
+                        old_reg_features = ori_intermediate_outputs + [ori_feature]
+                        new_reg_features = intermediate_outputs + [feature]
+                        # sem_logits_small is logit right before softmax/sigmoid
+                        reg_loss = features_distillation8(old_reg_features, new_reg_features)
+                        reg_loss += features_distillation_channel(old_reg_features, new_reg_features)
+
+                        loss = loss + reg_loss
+                    else:
+                        # Feature extractor regularization + classifier regularization
+                        regularization_loss = l2_criterion(feature, ori_feature)
+                        regularization_loss = regularization_loss * self.cfg.TASK_SPECIFIC.GIFS.feature_reg_lambda # hyperparameter lambda
+                        loss = loss + regularization_loss
+                        # PD Loss from PIFS
+                        with torch.no_grad():
+                            distill_output = post_processor_distillation_ref(ori_feature, ori_spatial_res, scale_factor=10)
+                        clf_loss = my_kd_criterion(output, distill_output) * self.cfg.TASK_SPECIFIC.GIFS.classifier_reg_lambda
+                        loss = loss + clf_loss
+
+                optimizer.zero_grad() # reset gradient
+                scaler.scale(loss).backward() # loss.backward()
+                scaler.step(optimizer) # optimizer.step()
+                scaler.update()
                 scheduler.step()
                 t.set_description_str("Loss: {:.4f}".format(loss.item()))
