@@ -33,7 +33,6 @@ DATASET:
         crop_size: (513, 513)
     TEST:
       transforms: ('normalize', )
-      joint_transforms: ('joint_random_resized_crop', 'joint_random_horizontal_flip')
       TRANSFORMS_DETAILS:
         NORMALIZE:
           mean: (0.4700, 0.4468, 0.4076)

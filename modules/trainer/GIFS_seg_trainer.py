@@ -133,7 +133,7 @@ class GIFS_seg_trainer(seg_trainer):
         total_mean_iou = np.add(test_base_iou_list, test_novel_iou_list) / 2
         max_mean_iou_index = np.where(total_mean_iou==np.amax(total_mean_iou))[0][0]
 
-        print("Results of {} runs in a non-few-shot setting".format(num_runs))
+        print("Results of {} runs; few-shot: {}".format(num_runs, few_shot_flag))
         print("max Base IoU: {:.4f} max Novel IoU: {:.4f}".format(test_base_iou_list[max_mean_iou_index],
                                                                   test_novel_iou_list[max_mean_iou_index]))
 
@@ -221,7 +221,7 @@ class GIFS_seg_trainer(seg_trainer):
         # Aggregate weights
         aggregated_weights = self.classifier_weight_imprinting(base_class_idx, novel_class_idx,
                                                                support_set)
-        self.post_processor.pixel_classifier.class_mat.weight.data = aggregated_weights
+        self.post_processor.pixel_classifier.class_mat.weight = torch.nn.Parameter(aggregated_weights)
 
         # Optimization over support set to fine-tune initialized vectors
         if self.cfg.TASK_SPECIFIC.GIFS.fine_tuning:
