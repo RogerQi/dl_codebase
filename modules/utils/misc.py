@@ -11,7 +11,12 @@ def get_dataset_root():
     try:
         return os.environ['DATASET_ROOT']
     except KeyError:
-        return "/data"
+        if os.path.exists('/root/autodl-tmp'):
+            return '/root/autodl-tmp'
+        elif os.path.exists('/data'):
+            return '/data'
+        else:
+            raise Exception("Data dir not found. Please specify data base dir in $DATASET_ROOT")
 
 def guess_device():
     if torch.cuda.is_available():
