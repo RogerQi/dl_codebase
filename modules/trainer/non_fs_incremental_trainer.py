@@ -421,7 +421,7 @@ class non_fs_incremental_trainer(non_fs_sequential_GIFS_seg_trainer):
                 target_bhw = torch.stack(mask_list).to(self.device).detach().long()
 
                 with torch.cuda.amp.autocast(enabled=True):
-                    feature, intermediate_outputs = self.backbone_net(data_bchw)
+                    feature = self.backbone_net(data_bchw)
                     ori_spatial_res = data_bchw.shape[-2:]
                     output = self.post_processor(feature, ori_spatial_res, scale_factor=10)
 
@@ -456,29 +456,18 @@ class non_fs_incremental_trainer(non_fs_sequential_GIFS_seg_trainer):
                     # L2 regularization on feature extractor
                     with torch.no_grad():
                         # self.vanilla_backbone_net for the base version
-                        ori_feature, ori_intermediate_outputs = self.prv_backbone_net(data_bchw)
+                        ori_feature = self.prv_backbone_net(data_bchw)
                         ori_logit = self.prv_post_processor(ori_feature, ori_spatial_res, scale_factor=10)
 
-                    if False:
-                        # ASPP head output
-                        # Intermediate output from ResNet backbone
-                        old_reg_features = ori_intermediate_outputs + [ori_feature]
-                        new_reg_features = intermediate_outputs + [feature]
-                        # sem_logits_small is logit right before softmax/sigmoid
-                        reg_loss = features_distillation8(old_reg_features, new_reg_features)
-                        reg_loss += features_distillation_channel(old_reg_features, new_reg_features)
-
-                        loss = loss + reg_loss
-                    else:
-                        # Feature extractor regularization + classifier regularization
-                        regularization_loss = l2_criterion(feature, ori_feature)
-                        regularization_loss = regularization_loss * self.cfg.TASK_SPECIFIC.GIFS.feature_reg_lambda # hyperparameter lambda
-                        loss = loss + regularization_loss
-                        # PD Loss from PIFS
-                        with torch.no_grad():
-                            distill_output = post_processor_distillation_ref(ori_feature, ori_spatial_res, scale_factor=10)
-                        clf_loss = my_kd_criterion(output, distill_output) * self.cfg.TASK_SPECIFIC.GIFS.classifier_reg_lambda
-                        loss = loss + clf_loss
+                    # Feature extractor regularization + classifier regularization
+                    regularization_loss = l2_criterion(feature, ori_feature)
+                    regularization_loss = regularization_loss * self.cfg.TASK_SPECIFIC.GIFS.feature_reg_lambda # hyperparameter lambda
+                    loss = loss + regularization_loss
+                    # PD Loss from PIFS
+                    with torch.no_grad():
+                        distill_output = post_processor_distillation_ref(ori_feature, ori_spatial_res, scale_factor=10)
+                    clf_loss = my_kd_criterion(output, distill_output) * self.cfg.TASK_SPECIFIC.GIFS.classifier_reg_lambda
+                    loss = loss + clf_loss
 
                 optimizer.zero_grad() # reset gradient
                 scaler.scale(loss).backward() # loss.backward()
