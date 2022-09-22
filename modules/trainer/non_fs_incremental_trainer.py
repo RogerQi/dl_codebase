@@ -421,7 +421,7 @@ class non_fs_incremental_trainer(non_fs_sequential_GIFS_seg_trainer):
                 target_bhw = torch.stack(mask_list).to(self.device).detach().long()
 
                 with torch.cuda.amp.autocast(enabled=True):
-                    feature, intermediate_outputs = self.backbone_net(data_bchw, return_intermediate=True)
+                    feature, intermediate_outputs = self.backbone_net(data_bchw)
                     ori_spatial_res = data_bchw.shape[-2:]
                     output = self.post_processor(feature, ori_spatial_res, scale_factor=10)
 
@@ -456,7 +456,7 @@ class non_fs_incremental_trainer(non_fs_sequential_GIFS_seg_trainer):
                     # L2 regularization on feature extractor
                     with torch.no_grad():
                         # self.vanilla_backbone_net for the base version
-                        ori_feature, ori_intermediate_outputs = self.prv_backbone_net(data_bchw, return_intermediate=True)
+                        ori_feature, ori_intermediate_outputs = self.prv_backbone_net(data_bchw)
                         ori_logit = self.prv_post_processor(ori_feature, ori_spatial_res, scale_factor=10)
 
                     if False:
