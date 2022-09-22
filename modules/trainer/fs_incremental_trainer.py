@@ -286,14 +286,14 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
             for i in range(num_existing_objects):
                 selected_class = np.random.choice(candidate_classes)
                 selected_sample = random.choice(self.partial_data_pool[selected_class])
-                img_chw, mask_hw = selected_sample
+                full_img_chw, full_mask_hw, img_chw, mask_hw = selected_sample
                 syn_img_chw, syn_mask_hw = utils.copy_and_paste(img_chw, mask_hw, syn_img_chw, syn_mask_hw, selected_class)
 
         # Synthesize selected novel class
         if torch.rand(1) < selected_novel_prob:
             for i in range(num_novel_objects):
                 selected_sample = random.choice(self.partial_data_pool[novel_obj_id])
-                img_chw, mask_hw = selected_sample
+                full_img_chw, full_mask_hw, img_chw, mask_hw = selected_sample
                 syn_img_chw, syn_mask_hw = utils.copy_and_paste(img_chw, mask_hw, syn_img_chw, syn_mask_hw, novel_obj_id)
 
         return (syn_img_chw, syn_mask_hw)
@@ -364,7 +364,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                 # Minimum bounding rectangle computed; now register it to the data pool
                 if novel_obj_id not in self.partial_data_pool:
                     self.partial_data_pool[novel_obj_id] = []
-                self.partial_data_pool[novel_obj_id].append((img_roi, mask_roi))
+                self.partial_data_pool[novel_obj_id].append((novel_img_chw, mask_hw == novel_obj_id, img_roi, mask_roi))
 
         self.backbone_net.train()
         self.post_processor.train()
@@ -404,49 +404,64 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
             for iter_i in t:
                 image_list = []
                 mask_list = []
+                fully_labeled_flag = []
+                partial_positive_idx = []
                 for _ in range(batch_size):
-                    if True:
+                    if torch.rand(1) < 0.8:
                         # synthesis
                         novel_obj_id = random.choice(novel_class_idx)
                         img_chw, mask_hw = self.synthesizer_sample(novel_obj_id)
                         image_list.append(img_chw)
                         mask_list.append(mask_hw)
+                        fully_labeled_flag.append(True)
                     else:
                         # full mask
                         chosen_cls = random.choice(list(novel_class_idx))
                         idx = random.choice(support_set[chosen_cls])
                         img_chw, mask_hw = self.continual_train_set[idx]
-                        if False:
-                            # Mask non-novel portion using pseudo labels
-                            with torch.no_grad():
-                                data_bchw = img_chw.to(self.device)
-                                data_bchw = data_bchw.view((1,) + data_bchw.shape)
-                                feature = self.prv_backbone_net(data_bchw)
-                                ori_spatial_res = data_bchw.shape[-2:]
-                                output = self.prv_post_processor(feature, ori_spatial_res, scale_factor=10)
-                            tmp_target_hw = output.max(dim = 1)[1].cpu()[0]
-                            for novel_obj_id in support_set.keys():
-                                novel_mask = torch.zeros_like(mask_hw)
-                                novel_mask = torch.logical_or(novel_mask, mask_hw == novel_obj_id)
-                            tmp_target_hw[novel_mask] = mask_hw[novel_mask]
-                            mask_hw = tmp_target_hw
-                        if False:
-                            # Copy-paste augmentation from other support images
-                            copy_cls = random.choice(list(novel_class_idx))
-                            copy_idx = random.choice(support_set[copy_cls])
-                            copy_img_chw, copy_mask_hw = self.continual_train_set[(copy_idx, {'aug': False})]
-                            img_chw, mask_hw = utils.copy_and_paste(copy_img_chw, copy_mask_hw == copy_cls, img_chw, mask_hw, copy_cls)
+                        mask_hw[mask_hw != chosen_cls] = 0
+                        mask_hw[mask_hw == chosen_cls] = 1
                         image_list.append(img_chw)
                         mask_list.append(mask_hw)
+                        fully_labeled_flag.append(False)
+                        partial_positive_idx.append(chosen_cls)
+                partial_positive_idx = torch.tensor(partial_positive_idx)
+                fully_labeled_flag = torch.tensor(fully_labeled_flag)
                 data_bchw = torch.stack(image_list).to(self.device).detach()
-                target_bhw = torch.stack(mask_list).to(self.device).detach()
+                target_bhw = torch.stack(mask_list).to(self.device).detach().long()
 
-                # TODO: mixed-precision training doesn't seem to reduce GPU memory now?
                 with torch.cuda.amp.autocast(enabled=True):
                     feature, intermediate_outputs = self.backbone_net(data_bchw, return_intermediate=True)
                     ori_spatial_res = data_bchw.shape[-2:]
                     output = self.post_processor(feature, ori_spatial_res, scale_factor=10)
-                    loss = self.criterion(output, target_bhw)
+
+                    if True:
+                        # CE loss on all fully-labeled images
+                        output_logit_bchw = F.softmax(output, dim=1)
+                        output_logit_bchw = torch.log(output_logit_bchw)
+                        loss = F.nll_loss(output_logit_bchw[fully_labeled_flag], target_bhw[fully_labeled_flag], ignore_index=-1)
+
+                        # MiB loss (modified CE) on partially-labeled images
+                        if len(partial_positive_idx) > 0:
+                            partial_labeled_flag = torch.logical_not(fully_labeled_flag)
+                            output_logit_bchw = F.softmax(output[partial_labeled_flag], dim=1)
+                            # Reduce to 0/1 using MiB for NLL loss
+                            assert output_logit_bchw.shape[0] == len(partial_positive_idx)
+                            fg_prob_list = []
+                            bg_prob_list = []
+                            for b in range(output_logit_bchw.shape[0]):
+                                fg_prob_hw = output_logit_bchw[b,partial_positive_idx[b]]
+                                bg_prob_chw = output_logit_bchw[b,torch.arange(output_logit_bchw.shape[1]) != partial_positive_idx[b]]
+                                bg_prob_hw = torch.sum(bg_prob_chw, dim=0)
+                                fg_prob_list.append(fg_prob_hw)
+                                bg_prob_list.append(bg_prob_hw)
+                            fg_prob_map = torch.stack(fg_prob_list)
+                            bg_prob_map = torch.stack(bg_prob_list)
+                            reduced_output_bchw = torch.stack([bg_prob_map, fg_prob_map], dim=1)
+                            reduced_logit_bchw = torch.log(reduced_output_bchw)
+                            loss = loss + F.nll_loss(reduced_logit_bchw, target_bhw[partial_labeled_flag], ignore_index=-1)
+                    else:
+                        loss = self.criterion(output, target_bhw)
 
                     # L2 regularization on feature extractor
                     with torch.no_grad():
