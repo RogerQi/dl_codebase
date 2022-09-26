@@ -45,7 +45,7 @@ DATASET:
 TRAIN:
   max_epochs: 20
   batch_size: 32
-  initial_lr: 1e-2
+  initial_lr: 1e-3
   lr_scheduler: "polynomial"
   step_down_gamma: 0.1
   step_down_on_epoch: [50, 80]
