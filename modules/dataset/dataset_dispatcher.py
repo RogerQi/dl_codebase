@@ -44,11 +44,5 @@ def dataset_dispatcher(cfg):
     elif dataset_name == "ade20k_incremental":
         import dataset.ade20k_incremental
         return dataset.ade20k_incremental
-    elif dataset_name == "lvis150":
-        import dataset.lvis150
-        return dataset.lvis150
-    elif dataset_name == "lvis150_incremental":
-        import dataset.lvis150_incremental
-        return dataset.lvis150_incremental
     else:
         raise NotImplementedError
