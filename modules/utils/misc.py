@@ -11,8 +11,8 @@ def get_dataset_root():
     try:
         return os.environ['DATASET_ROOT']
     except KeyError:
-        if os.path.exists('/root/autodl-tmp'):
-            return '/root/autodl-tmp'
+        if os.path.exists('/root/autodl-tmp/data'):
+            return '/root/autodl-tmp/data'
         elif os.path.exists('/data'):
             return '/data'
         else:
