@@ -27,6 +27,10 @@ from dataset.scannet_seq_reader import scannet_scene_reader
 
 memory_bank_size = 500
 
+def sample_weight_lookup(scene_name, frame_idx):
+    # Dummy function right now
+    return 1
+
 class live_continual_seg_trainer(seg_trainer):
     def __init__(self, cfg, backbone_net, post_processor, criterion, dataset_module, device):
         super(live_continual_seg_trainer, self).__init__(cfg, backbone_net, post_processor, criterion, dataset_module, device)
@@ -77,6 +81,7 @@ class live_continual_seg_trainer(seg_trainer):
     
     def test_one(self, device):
         self.kill_switch = False
+        self.training_token_cnt = 0
         self.backbone_net.eval()
         self.post_processor.eval()
         num_clicks_spent = {}
@@ -97,168 +102,196 @@ class live_continual_seg_trainer(seg_trainer):
         automatic_iou_list = []
         automatic_precision_list = []
         print(obj_scene_map)
-        # self.process_pool[f'adaptation_{k}'] = t
-        for canonical_obj_name in interest_obj_list:
+        obj_scene_pair_list = []
+
+        for k in obj_scene_map:
+            for scene in obj_scene_map[k]:
+                obj_scene_pair_list.append((k, scene))
+        
+        # default run
+        # np.random.seed(42)
+        np.random.shuffle(obj_scene_pair_list)
+        for (canonical_obj_name, scene_name) in obj_scene_pair_list:
+        # for canonical_obj_name in interest_obj_list:
             potential_ann_dir = f'/data/ICRA2023/provided_masks/{canonical_obj_name}'
             if os.path.exists(potential_ann_dir):
                 all_anno_list = os.listdir(potential_ann_dir)
             else:
                 all_anno_list = []
-            for scene_name in obj_scene_map[canonical_obj_name]:
-                num_clicks_spent[scene_name] = 0
-                my_seq_reader = scannet_scene_reader("/media/roger/My Book/data/scannet_v2", scene_name, canonical_obj_name)
-                print(f"Working on scene name {scene_name} with {len(my_seq_reader)} frames")
-                print(f"Object adapting: {canonical_obj_name}")
-                inst_name_map = my_seq_reader.get_inst_name_map() # from inst map to object
-                first_seen_dict = {}
-                annotated_frame_per_inst = {}
-                vos_obj_cnt = 0
-                my_vos.reset_engine()
-                tp_cnt = 0
-                fp_cnt = 0
-                tn_cnt = 0
-                fn_cnt = 0
-                save_base_dir = f"/data/ICRA2023/gaps_vos_prob_map/{canonical_obj_name}/{scene_name}"
-                os.makedirs(save_base_dir, exist_ok=True)
-                vos_goodview_flag = False
-                for i in trange(len(my_seq_reader)):
-                    data_dict = my_seq_reader[i]
-                    img = data_dict['color']
+            # for scene_name in obj_scene_map[canonical_obj_name]:
+            num_clicks_spent[scene_name] = 0
+            my_seq_reader = scannet_scene_reader("/media/roger/My Book/data/scannet_v2", scene_name, canonical_obj_name)
+            print(f"Working on scene name {scene_name} with {len(my_seq_reader)} frames")
+            print(f"Object adapting: {canonical_obj_name}")
+            inst_name_map = my_seq_reader.get_inst_name_map() # from inst map to object
+            first_seen_dict = {}
+            annotated_frame_per_inst = {}
+            vos_obj_cnt = 0
+            my_vos.reset_engine()
+            tp_cnt = 0
+            fp_cnt = 0
+            tn_cnt = 0
+            fn_cnt = 0
+            save_base_dir = f"/data/ICRA2023/gaps_vos_prob_map/{canonical_obj_name}/{scene_name}"
+            os.makedirs(save_base_dir, exist_ok=True)
+            vos_goodview_flag = False
+            for i in trange(len(my_seq_reader)):
+                data_dict = my_seq_reader[i]
+                img = data_dict['color']
+                if save_to_disk_flag:
+                    path = os.path.join(save_base_dir, f"{str(i).zfill(6)}_rgb.jpg")
+                    Image.fromarray(img).save(path)
+                mask = data_dict['semantic_label']
+                inst_map = data_dict['inst_label']
+                img_chw = torch.tensor(img).float().permute((2, 0, 1))
+                img_chw = img_chw / 255 # norm to 0-1
+                img_chw = self.normalizer(img_chw)
+                img_bchw = img_chw.view((1,) + img_chw.shape)
+                # only 1 batch
+                pred_prob_map = self.infer_one(img_bchw, ret_prob_map=True)[0]
+                pred_map = pred_prob_map.max(dim = 0)[1].cpu().numpy()
+                # VOS prediction
+                if my_vos.frame_cnt != 0:
+                    vos_pred_map = my_vos.propagate_one_frame(img)
+                    vos_pred_map[vos_pred_map > 0] = 1 # instance-level -> binary
+                    if np.sum(vos_pred_map) == 0:
+                        vos_goodview_flag = False
+                    if vos_goodview_flag:
+                        tmp_dict = utils.compute_binary_metrics(vos_pred_map.astype(np.uint8), mask)
+                        automatic_iou_list.append(tmp_dict['iou'])
+                        automatic_precision_list.append(tmp_dict['precision'])
+                        self.novel_adapt_single(img_chw, torch.tensor(vos_pred_map).int(), canonical_obj_name, scene_name + 'vos', i)
+                    # if True:
+                    #     if mask.sum() > 0:
+                    #         self.novel_adapt_single(img_chw, torch.tensor(mask).int(), canonical_obj_name, scene_name + 'vos', i)
                     if save_to_disk_flag:
-                        path = os.path.join(save_base_dir, f"{str(i).zfill(6)}_rgb.jpg")
-                        Image.fromarray(img).save(path)
-                    mask = data_dict['semantic_label']
-                    inst_map = data_dict['inst_label']
-                    img_chw = torch.tensor(img).float().permute((2, 0, 1))
-                    img_chw = img_chw / 255 # norm to 0-1
-                    img_chw = self.normalizer(img_chw)
-                    img_bchw = img_chw.view((1,) + img_chw.shape)
-                    # only 1 batch
-                    pred_prob_map = self.infer_one(img_bchw, ret_prob_map=True)[0]
-                    pred_map = pred_prob_map.max(dim = 0)[1].cpu().numpy()
-                    # VOS prediction
-                    if my_vos.frame_cnt != 0:
-                        vos_pred_map = my_vos.propagate_one_frame(img)
-                        vos_pred_map[vos_pred_map > 0] = 1 # instance-level -> binary
-                        if np.sum(vos_pred_map) == 0:
-                            vos_goodview_flag = False
-                        if vos_goodview_flag:
-                            tmp_dict = utils.compute_binary_metrics(vos_pred_map.astype(np.uint8), mask)
-                            automatic_iou_list.append(tmp_dict['iou'])
-                            automatic_precision_list.append(tmp_dict['precision'])
-                            self.novel_adapt_single(img_chw, torch.tensor(mask).int(), canonical_obj_name, scene_name + 'vos', i)
-                        if save_to_disk_flag:
-                            path = os.path.join(save_base_dir, f"{str(i).zfill(6)}_vos.png")
-                            Image.fromarray(vos_pred_map.astype(np.uint8)).save(path)
-                    if canonical_obj_name in self.class_names:
-                        interest_cls_idx = self.class_names.index(canonical_obj_name)
-                        # Seen this object before, eval
-                        metrics_dict = utils.compute_binary_metrics((pred_map == interest_cls_idx).astype(np.uint8), mask)
-                        tp_cnt += metrics_dict['tp']
-                        fp_cnt += metrics_dict['fp']
-                        tn_cnt += metrics_dict['tn']
-                        fn_cnt += metrics_dict['fn']
-                        if save_to_disk_flag:
-                            pred_prob_map_to_save = torch.softmax(pred_prob_map, dim=0).cpu().numpy()[-1] * 65535
-                            pred_prob_map_to_save = pred_prob_map_to_save.astype(np.uint16)
-                            path = os.path.join(save_base_dir, f"{str(i).zfill(6)}_raw_prob.png")
-                            Image.fromarray(pred_prob_map_to_save).save(path)
-                            gaps_pred = (pred_map==interest_cls_idx).astype(np.uint8) * 255
-                            path = os.path.join(save_base_dir, f"{str(i).zfill(6)}_gaps_pred.png")
-                            Image.fromarray(gaps_pred).save(path)
-                            path = os.path.join(save_base_dir, f"{str(i).zfill(6)}_gt.png")
-                            Image.fromarray(((mask == 1) * 255).astype(np.uint8)).save(path)
-                    provided_ann_list = [i for i in all_anno_list if scene_name in i]
-                    if len(provided_ann_list) > 0:
-                        potential_frame_name = f'{scene_name}_{str(i).zfill(6)}.png'
-                        if potential_frame_name in provided_ann_list:
-                            print("Found provided mask: {}".format(potential_frame_name))
-                            provided_mask_path = os.path.join(potential_ann_dir, potential_frame_name)
-                            provided_mask = np.array(Image.open(provided_mask_path))
-                            provided_mask = provided_mask / 255.0
-                            provided_mask = torch.tensor(provided_mask).int()
-                            self.novel_adapt_single(img_chw, provided_mask, canonical_obj_name, scene_name, i)
-                            vos_label = provided_mask.long()
+                        path = os.path.join(save_base_dir, f"{str(i).zfill(6)}_vos.png")
+                        Image.fromarray(vos_pred_map.astype(np.uint8)).save(path)
+                if canonical_obj_name in self.class_names:
+                    interest_cls_idx = self.class_names.index(canonical_obj_name)
+                    # Seen this object before, eval
+                    metrics_dict = utils.compute_binary_metrics((pred_map == interest_cls_idx).astype(np.uint8), mask)
+                    tp_cnt += metrics_dict['tp']
+                    fp_cnt += metrics_dict['fp']
+                    tn_cnt += metrics_dict['tn']
+                    fn_cnt += metrics_dict['fn']
+                    if save_to_disk_flag:
+                        pred_prob_map_to_save = torch.softmax(pred_prob_map, dim=0).cpu().numpy()[-1] * 65535
+                        pred_prob_map_to_save = pred_prob_map_to_save.astype(np.uint16)
+                        path = os.path.join(save_base_dir, f"{str(i).zfill(6)}_raw_prob.png")
+                        Image.fromarray(pred_prob_map_to_save).save(path)
+                        gaps_pred = (pred_map==interest_cls_idx).astype(np.uint8) * 255
+                        path = os.path.join(save_base_dir, f"{str(i).zfill(6)}_gaps_pred.png")
+                        Image.fromarray(gaps_pred).save(path)
+                        path = os.path.join(save_base_dir, f"{str(i).zfill(6)}_gt.png")
+                        Image.fromarray(((mask == 1) * 255).astype(np.uint8)).save(path)
+                # Visualization
+                # combined_pred_map = pred_map.copy()
+                # if vos_goodview_flag and canonical_obj_name in self.class_names:
+                #     combined_pred_map[vos_pred_map > 0] = interest_cls_idx
+                # label_vis = utils.visualize_segmentation(self.cfg, img_chw, combined_pred_map, self.class_names)
+                # cv2.imshow('rgb', cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+                # cv2.imshow('pred', cv2.cvtColor(label_vis, cv2.COLOR_RGB2BGR))
+                # if cv2.waitKey(1) & 0xFF == ord('q'):
+                #     break
+                provided_ann_list = [i for i in all_anno_list if scene_name in i]
+                if len(provided_ann_list) > 0:
+                    potential_frame_name = f'{scene_name}_{str(i).zfill(6)}.png'
+                    if potential_frame_name in provided_ann_list:
+                        print("Found provided mask: {}".format(potential_frame_name))
+                        provided_mask_path = os.path.join(potential_ann_dir, potential_frame_name)
+                        provided_mask = np.array(Image.open(provided_mask_path))
+                        provided_mask = provided_mask / 255.0
+                        provided_mask = torch.tensor(provided_mask).int()
+                        self.novel_adapt_single(img_chw, provided_mask, canonical_obj_name, scene_name, i)
+                        self.training_token_cnt += 1
+                        vos_label = provided_mask.long()
 
-                            # New VOS idx
-                            vos_inst_idx = vos_obj_cnt + 1
-                            vos_obj_cnt += 1
-                            vos_label[vos_label == 1] = vos_inst_idx
-                            my_vos.add_reference_frame(img, vos_label.cpu().numpy())
-                            vos_goodview_flag = True
-                    else:
-                        if mask.max() > 0: # Specified object is in view
-                            unique_inst_list = np.unique(inst_map)
-                            for inst in unique_inst_list:
-                                if inst == 0: continue # background
-                                if inst_name_map[inst] == canonical_obj_name:
-                                    if inst not in first_seen_dict:
-                                        first_seen_dict[inst] = i
+                        # New VOS idx
+                        vos_inst_idx = vos_obj_cnt + 1
+                        vos_obj_cnt += 1
+                        vos_label[vos_label == 1] = vos_inst_idx
+                        my_vos.add_reference_frame(img, vos_label.cpu().numpy())
+                        vos_goodview_flag = True
+                else:
+                    if mask.max() > 0: # Specified object is in view
+                        unique_inst_list = np.unique(inst_map)
+                        for inst in unique_inst_list:
+                            if inst == 0: continue # background
+                            if inst_name_map[inst] == canonical_obj_name:
+                                if inst not in first_seen_dict:
+                                    first_seen_dict[inst] = i
+                                else:
+                                    # Reaction
+                                    # Every time it is spotted, it needs to stay for at least 30 frames
+                                    if i < first_seen_dict[inst] + annotation_frame_idx:
+                                        continue
+                                    # Maximum 3 annotations per instance
+                                    if inst in annotated_frame_per_inst and len(annotated_frame_per_inst[inst]) >= 5:
+                                        continue
+                                    # At least 300 frames between adjacent annotations
+                                    if inst in annotated_frame_per_inst and i < annotated_frame_per_inst[inst][-1] + 300:
+                                        continue
+                                    # IoU
+                                    if canonical_obj_name in self.class_names:
+                                        try:
+                                            if metrics_dict['iou'] > 0.7:
+                                                continue
+                                        except UnboundLocalError:
+                                            pass # not define yet
+                                    # Pixel count
+                                    pixel_cnt = np.sum(inst_map == inst)
+                                    if pixel_cnt < minimum_instance_size:
+                                        continue
+                                    # Boundary
+                                    no_boundary_cnt = np.sum(inst_map[1:-1,1:-1] == inst)
+                                    if no_boundary_cnt != pixel_cnt:
+                                        # pixel locates at boundary
+                                        continue
+                                    # All criterion passed; now we can provide annotation
+                                    # select relevant instance
+                                    instance_mask = (inst_map == inst).astype(np.uint8)
+                                    # Simulate user inputs. RITM segmeter
+                                    provided_mask, num_click = my_ritm_segmenter.auto_eval(img, instance_mask, max_clicks=max_clicks, iou_thresh=iou_thresh)
+                                    if True:
+                                        # TODO: use RITM to provide annotations for all instances
+                                        provided_mask = mask
+                                    if save_to_disk_flag:
+                                        path = os.path.join(save_base_dir, f"{str(i).zfill(6)}_provided.npy")
+                                        np.save(path, provided_mask)
+                                    print("Spent {} clicks".format(num_click))
+                                    num_clicks_spent[scene_name] += num_click
+                                    provided_mask = torch.tensor(provided_mask).int()
+                                    self.novel_adapt_single(img_chw, provided_mask, canonical_obj_name, scene_name, i)
+                                    self.training_token_cnt += 1
+                                    vos_label = provided_mask.long()
+
+                                    if inst not in annotated_frame_per_inst:
+                                        annotated_frame_per_inst[inst] = [i]
                                     else:
-                                        # Reaction
-                                        # Every time it is spotted, it needs to stay for at least 30 frames
-                                        if i < first_seen_dict[inst] + annotation_frame_idx:
-                                            continue
-                                        # Maximum 3 annotations per instance
-                                        if inst in annotated_frame_per_inst and len(annotated_frame_per_inst[inst]) >= 5:
-                                            continue
-                                        # At least 300 frames between adjacent annotations
-                                        if inst in annotated_frame_per_inst and i < annotated_frame_per_inst[inst][-1] + 300:
-                                            continue
-                                        # IoU
-                                        if canonical_obj_name in self.class_names:
-                                            try:
-                                                if metrics_dict['iou'] > 0.7:
-                                                    continue
-                                            except UnboundLocalError:
-                                                pass # not define yet
-                                        # Pixel count
-                                        pixel_cnt = np.sum(inst_map == inst)
-                                        if pixel_cnt < minimum_instance_size:
-                                            continue
-                                        # Boundary
-                                        no_boundary_cnt = np.sum(inst_map[1:-1,1:-1] == inst)
-                                        if no_boundary_cnt != pixel_cnt:
-                                            # pixel locates at boundary
-                                            continue
-                                        # All criterion passed; now we can provide annotation
-                                        # select relevant instance
-                                        instance_mask = (inst_map == inst).astype(np.uint8)
-                                        # Simulate user inputs. RITM segmeter
-                                        provided_mask, num_click = my_ritm_segmenter.auto_eval(img, instance_mask, max_clicks=max_clicks, iou_thresh=iou_thresh)
-                                        if True:
-                                            # TODO: use RITM to provide annotations for all instances
-                                            provided_mask = mask
-                                        if save_to_disk_flag:
-                                            path = os.path.join(save_base_dir, f"{str(i).zfill(6)}_provided.npy")
-                                            np.save(path, provided_mask)
-                                        print("Spent {} clicks".format(num_click))
-                                        num_clicks_spent[scene_name] += num_click
-                                        provided_mask = torch.tensor(provided_mask).int()
-                                        self.novel_adapt_single(img_chw, provided_mask, canonical_obj_name, scene_name, i)
-                                        vos_label = provided_mask.long()
+                                        annotated_frame_per_inst[inst].append(i)
 
-                                        if inst not in annotated_frame_per_inst:
-                                            annotated_frame_per_inst[inst] = [i]
-                                        else:
-                                            annotated_frame_per_inst[inst].append(i)
+                                    # New VOS idx
+                                    vos_inst_idx = vos_obj_cnt + 1
+                                    vos_obj_cnt += 1
+                                    vos_label[vos_label == 1] = vos_inst_idx
+                                    my_vos.add_reference_frame(img, vos_label.cpu().numpy())
+                                    vos_goodview_flag = True
+                                    break
+            if num_clicks_spent[scene_name] == 0:
+                print("No annotation provided for {}".format(scene_name))
+            print("Object IoU: {:.4f}".format(tp_cnt / (tp_cnt + fp_cnt + fn_cnt + 1e-10)))
+            print("Recall: {:.4f}".format(tp_cnt / (tp_cnt + fn_cnt + 1e-10)))
+            print("Precision: {:.4f}".format(tp_cnt / (tp_cnt + fp_cnt + 1e-10)))
+            if self.fine_tune_busy_flag:
+                print("Waiting for fine-tuning to finish...")
+                while self.fine_tune_busy_flag:
+                    # TODO: this has to be significantly longer than the waiting time
+                    # in the monitoring thread so that there is no race condition
+                    # because self.eval_on_loader DOES NOT check the model updating flag
 
-                                        # New VOS idx
-                                        vos_inst_idx = vos_obj_cnt + 1
-                                        vos_obj_cnt += 1
-                                        vos_label[vos_label == 1] = vos_inst_idx
-                                        my_vos.add_reference_frame(img, vos_label.cpu().numpy())
-                                        vos_goodview_flag = True
-                                        break
-                if num_clicks_spent[scene_name] == 0:
-                    print("No annotation provided for {}".format(scene_name))
-                print("Object IoU: {:.4f}".format(tp_cnt / (tp_cnt + fp_cnt + fn_cnt + 1e-10)))
-                print("Recall: {:.4f}".format(tp_cnt / (tp_cnt + fn_cnt + 1e-10)))
-                print("Precision: {:.4f}".format(tp_cnt / (tp_cnt + fp_cnt + 1e-10)))
-                if self.fine_tune_busy_flag:
-                    print("Waiting for fine-tuning to finish...")
-                    while self.fine_tune_busy_flag:
-                        time.sleep(0.1)
+                    # TODO: implement proper lock for the monitoring thread
+                    time.sleep(10)
         print("Total clicks expanded: {}".format(num_clicks_spent))
         print(f"Total delay violation: {delay_violation_cnt}")
         print("eval on old dataset to test catastrophic forgetting")
@@ -343,17 +376,19 @@ class live_continual_seg_trainer(seg_trainer):
             time.sleep(0.1)
             if self.kill_switch:
                 break
-            for k in self.psuedo_database:
-                # If not fine-tuned or new data is available...
-                if k not in self.learned_data_map or len(self.psuedo_database[k]) > len(self.learned_data_map[k]):
-                    self.data_lock.acquire()
-                    self.fine_tune_busy_flag = True
-                    self.learned_data_map[k] = deepcopy(self.psuedo_database[k])
-                    self.data_lock.release()
-                    self.training_count += 1
-                    self.finetune_backbone_one(k)
-                    self.fine_tune_busy_flag = False
-                    break
+            if self.training_token_cnt >= 1:
+                for k in self.psuedo_database:
+                    # If not fine-tuned or new data is available...
+                    if k not in self.learned_data_map or len(self.psuedo_database[k]) > len(self.learned_data_map[k]):
+                        self.data_lock.acquire()
+                        self.fine_tune_busy_flag = True
+                        self.learned_data_map[k] = deepcopy(self.psuedo_database[k])
+                        self.data_lock.release()
+                        self.training_count += 1
+                        self.finetune_backbone_one(k)
+                        self.fine_tune_busy_flag = False
+                        break
+                self.training_token_cnt -= 1
         print(f"Total training count: {self.training_count}")
     
     def novel_adapt_single(self, img_chw, mask_hw, obj_name, scene_name, frame_idx):
@@ -363,7 +398,7 @@ class live_continual_seg_trainer(seg_trainer):
             img (torch.Tensor): Normalized RGB image tensor of shape (3, H, W)
             mask (torch.Tensor): Binary mask of novel object
         """
-        assert np.sum(mask_hw) > 0
+        assert mask_hw.sum() > 0
         img_roi, mask_roi = utils.crop_partial_img(img_chw, mask_hw)
         self.model_lock.acquire()
         num_existing_class = self.post_processor.pixel_classifier.class_mat.weight.data.shape[0]
@@ -417,10 +452,12 @@ class live_continual_seg_trainer(seg_trainer):
         # Compute probability for synthesis
         candidate_classes = [c for c in self.psuedo_database.keys() if c != novel_obj_name]
         # Gather some useful numbers
+        # TODO: change back to vRFS
         other_prob = 0.5
         selected_novel_prob = 0.5
         num_existing_objects = 1
         num_novel_objects = 1
+        sample_weight = 1
         assert other_prob >= 0 and other_prob <= 1
         assert selected_novel_prob >= 0 and selected_novel_prob <= 1
 
@@ -431,7 +468,8 @@ class live_continual_seg_trainer(seg_trainer):
                 selected_class = np.random.choice(candidate_classes)
                 selected_class_id = self.cls_name_id_map[selected_class]
                 selected_sample = random.choice(self.psuedo_database[selected_class])
-                _, _, img_roi, mask_roi, _, _ = selected_sample
+                _, _, img_roi, mask_roi, scene_name, frame_idx = selected_sample
+                sample_weight = min(sample_weight, sample_weight_lookup(scene_name, frame_idx))
                 syn_img_chw, syn_mask_hw = utils.copy_and_paste(img_roi, mask_roi, syn_img_chw, syn_mask_hw, selected_class_id)
 
         # Synthesize selected novel class
@@ -439,10 +477,11 @@ class live_continual_seg_trainer(seg_trainer):
             for i in range(num_novel_objects):
                 novel_class_id = self.cls_name_id_map[novel_obj_name]
                 selected_sample = random.choice(self.psuedo_database[novel_obj_name])
-                _, _, img_roi, mask_roi, _, _ = selected_sample
+                _, _, img_roi, mask_roi, scene_name, frame_idx = selected_sample
+                sample_weight = min(sample_weight, sample_weight_lookup(scene_name, frame_idx))
                 syn_img_chw, syn_mask_hw = utils.copy_and_paste(img_roi, mask_roi, syn_img_chw, syn_mask_hw, novel_class_id)
 
-        return (syn_img_chw, syn_mask_hw)
+        return (syn_img_chw, syn_mask_hw, sample_weight)
 
     def finetune_backbone_one(self, novel_obj_name):
         prv_backbone_net = deepcopy(self.backbone_net).eval()
@@ -482,16 +521,20 @@ class live_continual_seg_trainer(seg_trainer):
                 mask_list = []
                 fully_labeled_flag = []
                 partial_positive_idx = []
+                full_sample_weight = []
+                mib_sample_weight = []
                 for _ in range(batch_size):
                     if torch.rand(1) < 0.8:
                         # synthesis
-                        img_chw, mask_hw = self.synthesizer_sample(novel_obj_name)
+                        img_chw, mask_hw, sample_weight = self.synthesizer_sample(novel_obj_name)
                         image_list.append(img_chw)
                         mask_list.append(mask_hw)
                         fully_labeled_flag.append(True)
+                        full_sample_weight.append(sample_weight)
                     else:
                         # partially-labeled image
-                        img_chw, mask_hw, _, _, _, _ = random.choice(self.psuedo_database[novel_obj_name])
+                        img_chw, mask_hw, _, _, scene_name, frame_idx = random.choice(self.psuedo_database[novel_obj_name])
+                        mib_sample_weight.append(sample_weight_lookup(scene_name, frame_idx))
                         # TODO: implement proper augmentation
                         img_chw = tr_F.pad(img_chw, [(512 - img_chw.shape[2]) // 2, (512 - img_chw.shape[1]) // 2])
                         mask_hw = tr_F.pad(mask_hw, [(512 - mask_hw.shape[1]) // 2, (512 - mask_hw.shape[0]) // 2])
@@ -503,6 +546,8 @@ class live_continual_seg_trainer(seg_trainer):
                 fully_labeled_flag = torch.tensor(fully_labeled_flag)
                 data_bchw = torch.stack(image_list).to(self.device).detach()
                 target_bhw = torch.stack(mask_list).to(self.device).detach().long()
+                full_sample_weight = torch.tensor(full_sample_weight).to(self.device).detach()
+                mib_sample_weight = torch.tensor(mib_sample_weight).to(self.device).detach()
                 self.model_lock.acquire()
                 self.backbone_net.train()
                 self.post_processor.train()
@@ -519,7 +564,16 @@ class live_continual_seg_trainer(seg_trainer):
                     # TODO: better variable naming!
                     output_logit_bchw = F.softmax(output, dim=1)
                     output_logit_bchw = torch.log(output_logit_bchw)
-                    loss = F.nll_loss(output_logit_bchw[fully_labeled_flag], target_bhw[fully_labeled_flag], ignore_index=-1)
+                    synthesized_full_loss = F.nll_loss(output_logit_bchw[fully_labeled_flag],
+                                        target_bhw[fully_labeled_flag],
+                                        ignore_index=-1,
+                                        reduction='none') # BHW
+                    synthesized_full_loss = torch.mean(synthesized_full_loss, dim=(1, 2)) # B
+                    assert synthesized_full_loss.shape[0] == len(full_sample_weight)
+                    synthesized_full_loss = synthesized_full_loss * full_sample_weight
+                    synthesized_full_loss = torch.mean(synthesized_full_loss, dim=0)
+                    loss = synthesized_full_loss
+
                     # loss = self.criterion(output[fully_labeled_flag], target_bhw[fully_labeled_flag])
 
                     # Partially annotated image propagation using MiB loss
@@ -543,7 +597,15 @@ class live_continual_seg_trainer(seg_trainer):
                         reduced_logit_bchw = torch.log(reduced_output_bchw)
 
                         # TODO: test sum/mean
-                        loss = loss + F.nll_loss(reduced_logit_bchw, target_bhw[partial_labeled_flag], ignore_index=-1)
+                        mib_loss = F.nll_loss(reduced_logit_bchw,
+                                                target_bhw[partial_labeled_flag],
+                                                ignore_index=-1,
+                                                reduction='none')
+                        mib_loss = torch.mean(mib_loss, dim=(1, 2)) # B
+                        assert mib_loss.shape[0] == len(mib_sample_weight)
+                        mib_loss = mib_loss * mib_sample_weight
+                        mib_loss = torch.mean(mib_loss, dim=0)
+                        loss = loss + mib_loss
 
                     # Feature extractor regularization + classifier regularization
                     regularization_loss = l2_criterion(feature, ori_feature)
