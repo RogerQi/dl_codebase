@@ -15,6 +15,7 @@ import torchvision.transforms.functional as tr_F
 from tqdm import tqdm, trange
 import pickle
 from backbone.deeplabv3_renorm import BatchRenorm2d
+from modules.utils.visualization import save_to_disk
 
 import utils
 import vision_hub
@@ -85,28 +86,18 @@ class live_continual_seg_trainer(seg_trainer):
         self.data_lock.release()
         self.model_lock.release()
     
-    def test_one(self, device):
-        # Record the meta name of all data used in every training step
-        self.train_metadata_list = []
-        self.kill_switch = False
-        self.training_token_cnt = 0
-        self.backbone_net.eval()
-        self.post_processor.eval()
+    def simulate_adaptation(self, obj_scene_map, save_to_disk_flag=False):
+        # Clicking simulation
         num_clicks_spent = {}
         my_ritm_segmenter = vision_hub.interactive_seg.ritm_segmenter()
-        my_vos = vision_hub.vos.aot_segmenter()
         max_clicks = 20
         iou_thresh = 0.85 # for clicking
         annotation_frame_idx = 30
         minimum_instance_size = 2000
         delay_violation_cnt = 0
-        meta_fn = 'metadata/scannet_adaptation_5_scenes.pkl'
-        with open(meta_fn, 'rb') as f:
-            obj_scene_map = pickle.load(f)
-        save_to_disk_flag = False
-        interest_obj_list = sorted(list(obj_scene_map.keys()))
-        t = threading.Thread(target=self.monitor_thread)
-        t.start()
+
+        # VOS
+        my_vos = vision_hub.vos.aot_segmenter()
         automatic_iou_list = []
         automatic_precision_list = []
         obj_scene_pair_list = []
@@ -125,7 +116,6 @@ class live_continual_seg_trainer(seg_trainer):
                 all_anno_list = os.listdir(potential_ann_dir)
             else:
                 all_anno_list = []
-            # for scene_name in obj_scene_map[canonical_obj_name]:
             num_clicks_spent[scene_name] = 0
             my_seq_reader = scannet_scene_reader("/media/roger/My Book/data/scannet_v2", scene_name, canonical_obj_name)
             print(f"Working on scene name {scene_name} with {len(my_seq_reader)} frames")
@@ -301,14 +291,30 @@ class live_continual_seg_trainer(seg_trainer):
                     time.sleep(10)
         print("Total clicks expanded: {}".format(num_clicks_spent))
         print(f"Total delay violation: {delay_violation_cnt}")
+    
+    def test_one(self, device):
+        save_to_disk_flag = False
+        # Record the meta name of all data used in every training step
+        self.train_metadata_list = []
+        self.kill_switch = False
+        self.training_token_cnt = 0
+        self.backbone_net.eval()
+        self.post_processor.eval()
+        self.training_thread = threading.Thread(target=self.monitor_thread)
+        self.training_thread.start()
+
+        meta_fn = 'metadata/scannet_adaptation_5_scenes.pkl'
+        with open(meta_fn, 'rb') as f:
+            obj_scene_map = pickle.load(f)
+        
+        self.simulate_adaptation(obj_scene_map, save_to_disk_flag=save_to_disk_flag)
+        
+        interest_obj_list = sorted(list(obj_scene_map.keys()))
+
         print("eval on old dataset to test catastrophic forgetting")
         class_iou, pixel_acc = self.eval_on_loader(self.val_loader, self.cfg.num_classes)
         print("Base IoU after adaptation")
         print(np.mean(class_iou[:self.cfg.num_classes]))
-        print("GT IoU of automatically generated samples")
-        print(np.mean(automatic_iou_list))
-        print("GT Precision of auto-generated examples")
-        print(np.mean(automatic_precision_list))
         save_dir = '/data/ICRA2023/provided_masks_everything'
         if save_to_disk_flag:
             for k in self.psuedo_database:
