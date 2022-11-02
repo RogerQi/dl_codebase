@@ -307,10 +307,14 @@ class live_continual_seg_trainer(seg_trainer):
         with open(meta_fn, 'rb') as f:
             obj_scene_map = pickle.load(f)
         
-        self.simulate_adaptation(obj_scene_map, save_to_disk_flag=save_to_disk_flag)
+        if True:
+            self.adaptation_no_simulation()
+        else:
+            self.simulate_adaptation(obj_scene_map, save_to_disk_flag=save_to_disk_flag)
         
         interest_obj_list = sorted(list(obj_scene_map.keys()))
 
+        # Evaluation
         print("eval on old dataset to test catastrophic forgetting")
         class_iou, pixel_acc = self.eval_on_loader(self.val_loader, self.cfg.num_classes)
         print("Base IoU after adaptation")
@@ -362,7 +366,49 @@ class live_continual_seg_trainer(seg_trainer):
         for k in self.psuedo_database:
             print(f"Class {k} has {len(self.psuedo_database[k])} samples")
         self.kill_switch = True
-        embed(header='end')
+    
+    def adaptation_no_simulation(self):
+        generated_mask_dir = '/data/ICRA2023/provided_masks_everything'
+        with open('data_order.pkl', 'rb') as f:
+            data_meta_records = pickle.load(f)
+        metadata_to_path_dict = {}
+        obj_list = os.listdir(generated_mask_dir)
+        for obj in obj_list:
+            obj_dir = os.path.join(generated_mask_dir, obj)
+            fn_list = os.listdir(obj_dir)
+            for fn in fn_list:
+                if not fn.endswith('.jpg'):
+                    continue
+                full_path = os.path.join(obj_dir, fn)
+                assert fn[-11] == '_'
+                scene_name = fn[:-11]
+                frame_idx = int(fn[-10:-4])
+                key_str = f'{scene_name}_{str(frame_idx).zfill(6)}'
+                metadata_to_path_dict[key_str] = (obj, full_path)
+        # Last VOS sample doesn't get in clean data
+        assert len(metadata_to_path_dict) >= len(data_meta_records[-1])
+        for i in range(len(data_meta_records)):
+            if i == 0:
+                prv_sample_set = set()
+            else:
+                prv_sample_set = set(data_meta_records[i - 1])
+            new_sample_list = set(data_meta_records[i]) - prv_sample_set
+            for scene_name, frame_idx in new_sample_list:
+                # read image and mask
+                key_str = f'{scene_name}_{str(frame_idx).zfill(6)}'
+                obj_name, img_path = metadata_to_path_dict[key_str]
+                mask_path = img_path[:-4] + '.png'
+                img = np.array(Image.open(img_path).convert('RGB'))
+                mask = np.array(Image.open(mask_path)).astype(np.uint8)
+                mask[mask > 0] = 1
+                mask = torch.tensor(mask).int()
+                img_chw = torch.tensor(img).float().permute((2, 0, 1))
+                img_chw = img_chw / 255 # norm to 0-1
+                img_chw = self.normalizer(img_chw)
+                self.novel_adapt_single(img_chw, mask, obj_name, scene_name, frame_idx)
+            self.training_token_cnt += 1
+            while self.training_token_cnt > 0 or self.fine_tune_busy_flag:
+                time.sleep(0.5)
     
     def infer_one(self, img_bchw, ret_prob_map=False):
         self.model_lock.acquire()
@@ -456,6 +502,8 @@ class live_continual_seg_trainer(seg_trainer):
         # novel class. Use MAP to initialize weight
         supp_img_bchw_tensor = supp_img_chw.reshape((1,) + supp_img_chw.shape).to(self.device)
         supp_mask_bhw_tensor = supp_mask_hw.reshape((1,) + supp_mask_hw.shape).to(self.device)
+        self.backbone_net.eval()
+        self.post_processor.eval()
         with torch.no_grad():
             support_feature = self.backbone_net(supp_img_bchw_tensor)
             class_weight_vec = utils.masked_average_pooling(supp_mask_bhw_tensor == 1, support_feature, True)
