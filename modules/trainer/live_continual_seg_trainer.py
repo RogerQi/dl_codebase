@@ -27,6 +27,8 @@ from dataset.scannet_seq_reader import scannet_scene_reader
 
 memory_bank_size = 500
 
+infinite_memory_flag = False
+
 def sample_weight_lookup(scene_name, frame_idx):
     # Dummy function right now
     return 1
@@ -42,8 +44,12 @@ class live_continual_seg_trainer(seg_trainer):
         self.cls_name_id_map = {}
 
         # TODO(roger): for dev purpose we don't use any heuristic now
-        np.random.seed(1234)
-        self.base_img_candidates = np.random.choice(np.arange(0, len(self.train_set)), replace=False, size=(memory_bank_size,))
+        np.random.seed(42)
+        if infinite_memory_flag:
+            # whole dataset
+            self.base_img_candidates = np.arange(0, len(self.train_set))
+        else:
+            self.base_img_candidates = np.random.choice(np.arange(0, len(self.train_set)), replace=False, size=(memory_bank_size,))
         self.class_names = deepcopy(self.train_set.dataset.CLASS_NAMES_LIST)
 
         self.snapshot_dict = {}
@@ -80,6 +86,8 @@ class live_continual_seg_trainer(seg_trainer):
         self.model_lock.release()
     
     def test_one(self, device):
+        # Record the meta name of all data used in every training step
+        self.train_metadata_list = []
         self.kill_switch = False
         self.training_token_cnt = 0
         self.backbone_net.eval()
@@ -101,15 +109,14 @@ class live_continual_seg_trainer(seg_trainer):
         t.start()
         automatic_iou_list = []
         automatic_precision_list = []
-        print(obj_scene_map)
         obj_scene_pair_list = []
 
         for k in obj_scene_map:
             for scene in obj_scene_map[k]:
                 obj_scene_pair_list.append((k, scene))
         
-        # default run
-        # np.random.seed(42)
+        # default run uses seed 1234 ton construct object sequences
+        np.random.seed(1234)
         np.random.shuffle(obj_scene_pair_list)
         for (canonical_obj_name, scene_name) in obj_scene_pair_list:
         # for canonical_obj_name in interest_obj_list:
@@ -302,7 +309,7 @@ class live_continual_seg_trainer(seg_trainer):
         print(np.mean(automatic_iou_list))
         print("GT Precision of auto-generated examples")
         print(np.mean(automatic_precision_list))
-        save_dir = '/data/ICRA2023/provided_masks'
+        save_dir = '/data/ICRA2023/provided_masks_everything'
         if save_to_disk_flag:
             for k in self.psuedo_database:
                 cur_dir = os.path.join(save_dir, k)
@@ -349,6 +356,7 @@ class live_continual_seg_trainer(seg_trainer):
         for k in self.psuedo_database:
             print(f"Class {k} has {len(self.psuedo_database[k])} samples")
         self.kill_switch = True
+        embed(header='end')
     
     def infer_one(self, img_bchw, ret_prob_map=False):
         self.model_lock.acquire()
@@ -370,8 +378,9 @@ class live_continual_seg_trainer(seg_trainer):
         """Continuously monitor data pool. If an unlearned data is present, train the model.
         """
         self.fine_tune_busy_flag = False
-        self.learned_data_map = {}
+        self.clean_data_map = {}
         self.training_count = 0
+        self.data_metadata_record = []
         while True:
             time.sleep(0.1)
             if self.kill_switch:
@@ -379,11 +388,18 @@ class live_continual_seg_trainer(seg_trainer):
             if self.training_token_cnt >= 1:
                 for k in self.psuedo_database:
                     # If not fine-tuned or new data is available...
-                    if k not in self.learned_data_map or len(self.psuedo_database[k]) > len(self.learned_data_map[k]):
+                    if k not in self.clean_data_map or len(self.psuedo_database[k]) > len(self.clean_data_map[k]):
                         self.data_lock.acquire()
                         self.fine_tune_busy_flag = True
-                        self.learned_data_map[k] = deepcopy(self.psuedo_database[k])
+                        self.clean_data_map = deepcopy(self.psuedo_database)
                         self.data_lock.release()
+                        # Aggregate data
+                        cur_adaptation_data_record = []
+                        for clean_k in self.clean_data_map:
+                            for _, _, _, _, scene_name, frame_idx in self.clean_data_map[clean_k]:
+                                cur_adaptation_data_record.append((scene_name, frame_idx))
+                        print("Total training data pool size: {}".format(len(cur_adaptation_data_record)))
+                        self.data_metadata_record.append(cur_adaptation_data_record)
                         self.training_count += 1
                         self.finetune_backbone_one(k)
                         self.fine_tune_busy_flag = False
@@ -444,13 +460,13 @@ class live_continual_seg_trainer(seg_trainer):
     def synthesizer_sample(self, novel_obj_name):
         # Uniformly sample from the memory buffer
         base_img_idx = np.random.choice(self.base_img_candidates)
-        assert base_img_idx in self.base_img_candidates
-        assert len(self.base_img_candidates) == memory_bank_size
-        assert novel_obj_name in self.psuedo_database
+        if not infinite_memory_flag:
+            assert len(self.base_img_candidates) == memory_bank_size
+        assert novel_obj_name in self.clean_data_map
         syn_img_chw, syn_mask_hw = self.train_set[base_img_idx]
         # Sample from partial data pool
         # Compute probability for synthesis
-        candidate_classes = [c for c in self.psuedo_database.keys() if c != novel_obj_name]
+        candidate_classes = [c for c in self.clean_data_map.keys() if c != novel_obj_name]
         # Gather some useful numbers
         # TODO: change back to vRFS
         other_prob = 0.5
@@ -462,12 +478,12 @@ class live_continual_seg_trainer(seg_trainer):
         assert selected_novel_prob >= 0 and selected_novel_prob <= 1
 
         # Synthesize some other objects other than the selected novel object
-        if len(self.psuedo_database) > 1 and torch.rand(1) < other_prob:
+        if len(self.clean_data_map) > 1 and torch.rand(1) < other_prob:
             # select an old class
             for i in range(num_existing_objects):
                 selected_class = np.random.choice(candidate_classes)
                 selected_class_id = self.cls_name_id_map[selected_class]
-                selected_sample = random.choice(self.psuedo_database[selected_class])
+                selected_sample = random.choice(self.clean_data_map[selected_class])
                 _, _, img_roi, mask_roi, scene_name, frame_idx = selected_sample
                 sample_weight = min(sample_weight, sample_weight_lookup(scene_name, frame_idx))
                 syn_img_chw, syn_mask_hw = utils.copy_and_paste(img_roi, mask_roi, syn_img_chw, syn_mask_hw, selected_class_id)
@@ -476,7 +492,7 @@ class live_continual_seg_trainer(seg_trainer):
         if torch.rand(1) < selected_novel_prob:
             for i in range(num_novel_objects):
                 novel_class_id = self.cls_name_id_map[novel_obj_name]
-                selected_sample = random.choice(self.psuedo_database[novel_obj_name])
+                selected_sample = random.choice(self.clean_data_map[novel_obj_name])
                 _, _, img_roi, mask_roi, scene_name, frame_idx = selected_sample
                 sample_weight = min(sample_weight, sample_weight_lookup(scene_name, frame_idx))
                 syn_img_chw, syn_mask_hw = utils.copy_and_paste(img_roi, mask_roi, syn_img_chw, syn_mask_hw, novel_class_id)
@@ -533,7 +549,7 @@ class live_continual_seg_trainer(seg_trainer):
                         full_sample_weight.append(sample_weight)
                     else:
                         # partially-labeled image
-                        img_chw, mask_hw, _, _, scene_name, frame_idx = random.choice(self.psuedo_database[novel_obj_name])
+                        img_chw, mask_hw, _, _, scene_name, frame_idx = random.choice(self.clean_data_map[novel_obj_name])
                         mib_sample_weight.append(sample_weight_lookup(scene_name, frame_idx))
                         # TODO: implement proper augmentation
                         img_chw = tr_F.pad(img_chw, [(512 - img_chw.shape[2]) // 2, (512 - img_chw.shape[1]) // 2])
