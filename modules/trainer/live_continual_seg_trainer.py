@@ -292,6 +292,13 @@ class live_continual_seg_trainer(seg_trainer):
         print("Total clicks expanded: {}".format(num_clicks_spent))
         print(f"Total delay violation: {delay_violation_cnt}")
     
+    def eval_on_base(self):
+        print("eval on old dataset to test catastrophic forgetting")
+        class_iou, pixel_acc = self.eval_on_loader(self.val_loader, self.cfg.num_classes)
+        base_iou = np.mean(class_iou[:self.cfg.num_classes])
+        print("Base IoU after adaptation: {:.4f}".format(base_iou))
+        return base_iou
+    
     def test_one(self, device):
         save_to_disk_flag = False
         # Record the meta name of all data used in every training step
@@ -314,11 +321,6 @@ class live_continual_seg_trainer(seg_trainer):
         
         interest_obj_list = sorted(list(obj_scene_map.keys()))
 
-        # Evaluation
-        print("eval on old dataset to test catastrophic forgetting")
-        class_iou, pixel_acc = self.eval_on_loader(self.val_loader, self.cfg.num_classes)
-        print("Base IoU after adaptation")
-        print(np.mean(class_iou[:self.cfg.num_classes]))
         save_dir = '/data/ICRA2023/provided_masks_everything'
         if save_to_disk_flag:
             for k in self.psuedo_database:
@@ -327,6 +329,10 @@ class live_continual_seg_trainer(seg_trainer):
                 for img_chw, mask_hw, _, _, scene_name, frame_idx in self.psuedo_database[k]:
                     utils.save_to_disk(self.cfg, img_chw, os.path.join(cur_dir, f'{scene_name}_{str(frame_idx).zfill(6)}.jpg'))
                     utils.save_to_disk(self.cfg, (mask_hw * 255).long(), os.path.join(cur_dir, f'{scene_name}_{str(frame_idx).zfill(6)}.png'))
+
+        # Evaluation
+        self.eval_on_base()
+
         inter = None
         union = None
         for obj in interest_obj_list: # interest_obj_list
@@ -365,6 +371,23 @@ class live_continual_seg_trainer(seg_trainer):
         print(inter[self.cfg.num_classes:] / (union[self.cfg.num_classes:] + 1e-10))
         for k in self.psuedo_database:
             print(f"Class {k} has {len(self.psuedo_database[k])} samples")
+
+        # TODO: write general code for arbitrary iters streaming evaluation
+        if False:
+            cur_iter = self.training_count
+            base_iou_list = []
+            for i in range(cur_iter, 501):
+                if i % 10 == 0:
+                    base_iou = self.eval_on_base()
+                    base_iou_list.append((i, base_iou)) # iter idx, base_iou
+                    embed(header='test')
+                # do one training
+                self.training_token_cnt += 1
+                self.wait_training_finish()
+            
+            print("All base IoU")
+            print(base_iou_list)
+
         self.kill_switch = True
     
     def adaptation_no_simulation(self):
@@ -407,7 +430,10 @@ class live_continual_seg_trainer(seg_trainer):
                 img_chw = self.normalizer(img_chw)
                 self.novel_adapt_single(img_chw, mask, obj_name, scene_name, frame_idx)
             self.training_token_cnt += 1
-            while self.training_token_cnt > 0 or self.fine_tune_busy_flag:
+            self.wait_training_finish()
+    
+    def wait_training_finish(self):
+        while self.training_token_cnt > 0 or self.fine_tune_busy_flag:
                 time.sleep(0.5)
     
     def infer_one(self, img_bchw, ret_prob_map=False):
@@ -438,24 +464,28 @@ class live_continual_seg_trainer(seg_trainer):
             if self.kill_switch:
                 break
             if self.training_token_cnt >= 1:
+                # Try to look for new objects
+                new_k = random.choice(list(self.psuedo_database.keys()))
                 for k in self.psuedo_database:
                     # If not fine-tuned or new data is available...
                     if k not in self.clean_data_map or len(self.psuedo_database[k]) > len(self.clean_data_map[k]):
-                        self.data_lock.acquire()
-                        self.fine_tune_busy_flag = True
-                        self.clean_data_map = deepcopy(self.psuedo_database)
-                        self.data_lock.release()
-                        # Aggregate data
-                        cur_adaptation_data_record = []
-                        for clean_k in self.clean_data_map:
-                            for _, _, _, _, scene_name, frame_idx in self.clean_data_map[clean_k]:
-                                cur_adaptation_data_record.append((scene_name, frame_idx))
-                        print("Total training data pool size: {}".format(len(cur_adaptation_data_record)))
-                        self.data_metadata_record.append(cur_adaptation_data_record)
-                        self.training_count += 1
-                        self.finetune_backbone_one(k)
-                        self.fine_tune_busy_flag = False
+                        new_k = k
                         break
+                self.data_lock.acquire()
+                self.fine_tune_busy_flag = True
+                del self.clean_data_map
+                self.clean_data_map = deepcopy(self.psuedo_database)
+                self.data_lock.release()
+                # Aggregate data
+                cur_adaptation_data_record = []
+                for clean_k in self.clean_data_map:
+                    for _, _, _, _, scene_name, frame_idx in self.clean_data_map[clean_k]:
+                        cur_adaptation_data_record.append((scene_name, frame_idx))
+                print("Total training data pool size: {}".format(len(cur_adaptation_data_record)))
+                self.data_metadata_record.append(cur_adaptation_data_record)
+                self.training_count += 1
+                self.finetune_backbone_one(new_k)
+                self.fine_tune_busy_flag = False
                 self.training_token_cnt -= 1
         print(f"Total training count: {self.training_count}")
     
