@@ -65,6 +65,11 @@ class GIFS_seg_trainer(seg_trainer):
         np.random.seed(1234)
         seed_list = np.random.randint(0, 99999, size=(num_runs,))
 
+        print('few shot: ')
+        print(few_shot_flag)
+        print('num shots: ')
+        print(num_shots)
+
         # Evaluate incremental learning
         for i in range(num_runs):
             np.random.seed(seed_list[i])
