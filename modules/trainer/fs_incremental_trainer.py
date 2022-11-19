@@ -33,7 +33,8 @@ class kd_criterion(nn.Module):
         element_wise_loss = x_ref * torch.log(x_pred)
         return -torch.mean(element_wise_loss)
 
-memory_bank_size = 500
+# memory_bank_size = 500
+memory_bank_size = 100
 
 class fs_incremental_trainer(sequential_GIFS_seg_trainer):
     def __init__(self, cfg, backbone_net, post_processor, criterion, dataset_module, device):
