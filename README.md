@@ -1,23 +1,33 @@
 # Extendible continual few-shot segmentation framework
 
-This codebase should be as generic as possible. Implementation of fancy ideas should be built
-in fork of this repo rather than working in the repo itself to allow rapid development.
 
-Dependencies
+This codebase should be as generic as possible. Implementation of fancy ideas that require too many hackings
+should be built in fork of this repo rather than working in the repo itself to allow rapid development.
+
+## Reproduction
+
+The codebase contains implementation of the following works.
+
+### GAPS
+
+**[[Paper]](https://openreview.net/pdf?id=cDVL245jZa) [[Code]](docs/GAPS.md)**
+
+## Dependencies
+
 - PyTorch (torch, torchvision)
 - yacs
 - OpenCV
 - PIL
 
-TODOs
+## TODOs
+
 - Support for better Logging/Timing (tensorboard?)
 - Pack the modules folder as a package to get rid of sys.path tricks
-- Adapt registry (as in FAIR detectron 2) and use decorator for better style
 - Use logger instead for print for train summary between epochs
 - Support for more components
     - Loss
         - Focal Loss
-        - More Imbalanced Loss/or combiner
+        - More Long-tailed-aware Loss/Sampler
 - Update README docs in each folder
 - Add transforms foolproof sanity checker
     - consistency of normalization in train/test set
