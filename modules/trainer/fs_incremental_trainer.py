@@ -105,6 +105,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                         # print(class_pixel_count / pixel_count)
                         # print('printing similarity')
                         # print(similarity)
+                        similarity = similarity.to(self.device)
                         score = similarity / ratio
                         ##########################################
                         similarity_dic[c].append((score, i))
