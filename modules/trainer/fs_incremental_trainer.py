@@ -105,8 +105,10 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                         ##########################################
                         print('printing whole image pixels')
                         print(mask.shape[0] * mask.shape[1])
-                        print('printing class size')
+                        print('printing class size from mask')
                         print(torch.sum(mask == c))
+                        print('printing class size from mask_tensor')
+                        print(torch.sum(mask_tensor == c))
                         ##########################################
                         img_weight = img_weight.cpu().unsqueeze(0)
                         similarity = F.cosine_similarity(img_weight, mean_weight_dic[c])
