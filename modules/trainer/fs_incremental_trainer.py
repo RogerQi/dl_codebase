@@ -85,6 +85,13 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                     class_list = torch.unique(mask).tolist()
                     img_tensor = torch.stack([img]).to(self.device)
                     mask_tensor = torch.stack([mask]).to(self.device)
+
+                    ####################################
+                    print(mask_tensor)
+                    ####################################
+
+
+
                     for c in class_list:
                         if c not in base_id_set:
                             continue
