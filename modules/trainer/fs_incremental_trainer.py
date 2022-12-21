@@ -87,8 +87,6 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                     mask_tensor = torch.stack([mask]).to(self.device)
 
                     ####################################
-                    print('printing mask shape')
-                    print(mask.shape)
                     # mask_0 = mask[0,:,:]
                     # mask_1 = mask[1,:,:]
                     # mask_2 = mask[2, :, :]
@@ -104,6 +102,12 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                         with torch.no_grad():
                             img_feature = self.prv_backbone_net(img_tensor)
                             img_weight = utils.masked_average_pooling(mask_tensor == c, img_feature, True)
+                        ##########################################
+                        print('printing whole image pixels')
+                        print(mask.shape[0] * mask.shape[1])
+                        print('printing class size')
+                        print(torch.sum(mask == c))
+                        ##########################################
                         img_weight = img_weight.cpu().unsqueeze(0)
                         similarity = F.cosine_similarity(img_weight, mean_weight_dic[c])
                         similarity_dic[c].append((similarity, i))
