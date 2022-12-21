@@ -105,16 +105,17 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                         img_weight = img_weight.cpu().unsqueeze(0)
                         similarity = F.cosine_similarity(img_weight, mean_weight_dic[c])
                         ##########################################
-                        print('printing whole image pixels')
+                        # print('printing whole image pixels')
                         pixel_count = mask.shape[0] * mask.shape[1]
-                        print('printing class size from mask')
+                        # print('printing class size from mask')
                         class_pixel_count = torch.sum(mask_tensor == c)
-                        print(class_pixel_count)
-                        print('printing class-image ratio')
-                        print(class_pixel_count / pixel_count)
-                        print('printing similarity')
-                        print(similarity)
-                        score = similarity
+                        # print(class_pixel_count)
+                        # print('printing class-image ratio')
+                        ratio = class_pixel_count / pixel_count
+                        # print(class_pixel_count / pixel_count)
+                        # print('printing similarity')
+                        # print(similarity)
+                        score = similarity / ratio
                         ##########################################
                         similarity_dic[c].append((score, i))
                 for c in base_id_list:
