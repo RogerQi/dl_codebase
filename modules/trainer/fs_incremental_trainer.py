@@ -87,8 +87,11 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                     mask_tensor = torch.stack([mask]).to(self.device)
 
                     ####################################
+                    mask_0 = mask[0,:,:]
+                    mask_1 = mask[1,:,:]
+                    mask_2 = mask[2, :, :]
                     print('printing mask tensor: ')
-                    print(mask_tensor)
+                    print(sum(mask_1-mask_0))
                     ####################################
 
 
