@@ -114,8 +114,9 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                         print(class_pixel_count / pixel_count)
                         print('printing similarity')
                         print(similarity)
+                        score = similarity
                         ##########################################
-                        similarity_dic[c].append((similarity, i))
+                        similarity_dic[c].append((score, i))
                 for c in base_id_list:
                     similarity_dic[c] = sorted(similarity_dic[c], key=lambda x:x[0])
                 if not os.path.exists(baseset_folder):   
