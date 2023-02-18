@@ -1,4 +1,5 @@
 import os
+import math
 import random
 import time
 import numpy as np
@@ -33,6 +34,19 @@ class kd_criterion(nn.Module):
         element_wise_loss = x_ref * torch.log(x_pred)
         return -torch.mean(element_wise_loss)
 
+def encoder_forward(backbone_net, x):
+    x = backbone_net.conv1(x)
+    x = backbone_net.bn1(x)
+    x = backbone_net.relu(x)
+    x = backbone_net.maxpool(x)
+
+    x = backbone_net.layer1(x)
+    x = backbone_net.layer2(x)
+    x = backbone_net.layer3(x)
+    x = backbone_net.layer4(x)
+
+    return F.adaptive_avg_pool2d(x, 1)
+
 memory_bank_size = 500
 
 class fs_incremental_trainer(sequential_GIFS_seg_trainer):
@@ -56,7 +70,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         if baseset_type == 'random':
             print(f"construct {baseset_type} baseset for {self.cfg.name}")
             examplar_list = np.arange(0, len(self.train_set))
-        elif baseset_type in ['far', 'close', 'far_close', 'uniform_interval']:
+        elif baseset_type in ['far', 'close', 'far_close', 'uniform_interval', 'class_random']:
             print(f"construct {baseset_type} baseset for {self.cfg.name}")
             base_id_list = self.train_set.dataset.get_label_range()
             if not os.path.exists(f"{baseset_folder}/similarity_dic"):
@@ -114,6 +128,8 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                 m_far = m // 2
             elif baseset_type == 'uniform_interval':
                 m_interval = m
+            elif baseset_type == 'class_random':
+                m_interval = m
             else:
                 raise NotImplementedError
             # Combine all the top images of each class by set union
@@ -130,17 +146,71 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                     class_examplar_list = [i for _, i in far_list]
                     examplar_set = examplar_set.union(class_examplar_list)
                 if baseset_type == 'uniform_interval':
-                    assert m_interval <= len(similarity_dic[c]), f"Need {m_interval} from {len(similarity_dic[c])}"
-                    interval_size = len(similarity_dic[c]) // m_interval
+                    if len(similarity_dic[c]) < m_interval:
+                        print(f"Need {m_interval} from {len(similarity_dic[c])}")
+                    local_size = min(m_interval, len(similarity_dic[c]))
+                    interval_size = len(similarity_dic[c]) // local_size
                     class_examplar_list = []
-                    for i in range(m_interval):
+                    for i in range(local_size):
                         int_start = interval_size * i
                         assert int_start < len(similarity_dic[c])
                         int_end = min(interval_size * (i + 1), len(similarity_dic[c]))
                         sample_tuple = similarity_dic[c][np.random.randint(low=int_start, high=int_end)]
                         class_examplar_list.append(sample_tuple[1]) # first element is similarity
                     examplar_set = examplar_set.union(class_examplar_list)
+                if baseset_type == 'class_random':
+                    assert m_interval <= len(similarity_dic[c])
+                    selected_id_list = np.random.choice(np.arange(len(similarity_dic[c])), size=(m_interval,), replace=False)
+                    class_examplar_list = []
+                    for selected_id in selected_id_list:
+                        class_examplar_list.append(similarity_dic[c][selected_id][1])
+                    examplar_set = examplar_set.union(class_examplar_list)
             examplar_list = sorted(list(examplar_set))
+        elif baseset_type == 'RFS':
+            base_id_list = self.train_set.dataset.get_label_range()
+            t = 0.01
+            # count frequency
+            total_img_cnt = len(self.train_set)
+            category_rf = {}
+            for c in base_id_list:
+                if c == 0 or c == -1: continue
+                sample_cnt = len(self.train_set.dataset.get_class_map(c))
+                freq = sample_cnt / total_img_cnt
+                category_rf[c] = max(1, math.sqrt(t / freq))
+
+            # Reverse dict to look up class in an image
+            sample_factor_arr = np.zeros((len(self.train_set,)))
+            for c in base_id_list:
+                class_map = self.train_set.dataset.get_class_map(c)
+                class_factor = category_rf[c]
+                for sample_idx in class_map:
+                        sample_factor_arr[sample_idx] = max(sample_factor_arr[sample_idx], class_factor)
+            
+            # Sample 
+            sample_factor_arr = sample_factor_arr / np.sum(sample_factor_arr)
+            examplar_list = np.random.choice(np.arange(len(self.train_set)),
+                                    replace=False, size=(memory_bank_size,), p=sample_factor_arr)
+        elif baseset_type == 'greedy_class_num':
+            base_id_list = self.train_set.dataset.get_label_range()
+            # Reverse dict to look up class in an image
+            sample_cls_arr = np.zeros((len(self.train_set,)))
+            for c in base_id_list:
+                class_map = self.train_set.dataset.get_class_map(c)
+                for sample_idx in class_map:
+                    sample_cls_arr[sample_idx] += 1
+            
+            m = (memory_bank_size // len(base_id_list)) * 3
+
+            examplar_set = set()
+            for c in base_id_list:
+                cls_sample_list = self.train_set.dataset.get_class_map(c)
+                cls_sample_list = np.array(cls_sample_list)
+                sample_freq = sample_cls_arr[cls_sample_list]
+                sorted_idx = np.argsort(sample_freq)
+                selected_idx = sorted_idx[-m:]
+                selected_samples = cls_sample_list[selected_idx]
+                examplar_set = examplar_set.union(list(selected_samples))
+            examplar_list = list(examplar_set)
         else:
             raise AssertionError('invalid baseset_type', baseset_type)
         print(f"total number of examplar_list {len(examplar_list)}")
@@ -186,9 +256,9 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
             num_existing_objects = 2
             num_novel_objects = 2
         elif self.cfg.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat == 'always':
-            other_prob = 0
+            other_prob = 1
             selected_novel_prob = 1
-            num_existing_objects = 0
+            num_existing_objects = 2
             num_novel_objects = 2
         elif self.cfg.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat == 'CAS':
             other_prob = 1. / total_classes
@@ -229,20 +299,28 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         '''
         assert len(img.shape) == 3 # CHW
         img = img.view((1,) + img.shape)
-        if img.shape[2] != 224:
-            # Scene model is trained using 224 x 224 size
-            img = F.interpolate(img, size = (224, 224), mode = 'bilinear')
-        with torch.no_grad():
-            scene_embedding = self.scene_model(img)
-            scene_embedding = torch.flatten(scene_embedding, start_dim = 1)
-            # normalize to unit vector
-            norm = torch.norm(scene_embedding, p=2, dim =1).unsqueeze(1).expand_as(scene_embedding) # norm
-            scene_embedding = scene_embedding.div(norm+ 1e-5)
-        return scene_embedding.squeeze()
+        if True:
+            with torch.no_grad():
+                scene_embedding = encoder_forward(self.backbone_net, img)
+                scene_embedding = scene_embedding.squeeze()
+                norm = torch.norm(scene_embedding, p=2)
+                scene_embedding = scene_embedding.div(norm+ 1e-5)
+                return scene_embedding
+        else:
+            if img.shape[2] != 224:
+                # Scene model is trained using 224 x 224 size
+                img = F.interpolate(img, size = (224, 224), mode = 'bilinear')
+            with torch.no_grad():
+                scene_embedding = self.scene_model(img)
+                scene_embedding = torch.flatten(scene_embedding, start_dim = 1)
+                # normalize to unit vector
+                norm = torch.norm(scene_embedding, p=2, dim =1).unsqueeze(1).expand_as(scene_embedding) # norm
+                scene_embedding = scene_embedding.div(norm+ 1e-5)
+            return scene_embedding.squeeze()
     
     def scene_model_setup(self):
-        # Load torchscript
         self.scene_model = torch.jit.load('/data/cvpr2022/vgg16_scene_net.pt')
+        self.scene_model = self.scene_model.eval()
         self.scene_model = self.scene_model.to(self.device)
         # Compute feature vectors for data in the pool
         self.base_pool_cos_embeddings = []
@@ -262,6 +340,48 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
 
         print(f"Adapting to novel id {novel_class_idx}")
 
+        # Learned novel classes
+        prv_novel_class_idx = [k for k in support_set.keys() if int(k) < int(min(novel_class_idx))]
+
+        def extract_coco_w_single_instance(ds_reader, sample_idx, class_id, aug_flag):
+            # Get raw image and mask
+            img_id = ds_reader.dataset.img_ids[sample_idx]
+            raw_img = ds_reader.dataset._get_img(img_id)
+            raw_mask = ds_reader.dataset._get_mask(img_id)
+            assert class_id in raw_mask
+            # Get single-instance mask
+            img_metadata = ds_reader.dataset.coco.loadImgs(img_id)[0]
+            annotations = ds_reader.dataset.coco.imgToAnns[img_id]
+            annotations = sorted(annotations, key = lambda x : x['id'])
+            seg_mask = None
+
+            for ann in annotations:
+                real_class_id = ds_reader.dataset.class_map[ann['category_id']]
+                if real_class_id == class_id:
+                    ann_mask = torch.from_numpy(ds_reader.dataset.coco.annToMask(ann))
+                    assert real_class_id > 0 and real_class_id <= 80
+                    seg_mask = torch.zeros((img_metadata['height'], img_metadata['width']), dtype=torch.int64)
+                    seg_mask = torch.max(seg_mask, ann_mask * real_class_id)
+                    break
+            if seg_mask is None:
+                raise IndexError(f'Sample idx does not contain {class_id}')
+
+            # Mask out
+            seg_mask = seg_mask.int()
+            assert seg_mask.shape == raw_mask.shape
+            raw_mask[raw_mask == class_id] = 0
+            raw_mask[seg_mask == class_id] = class_id
+
+            # Augment if needed
+            if aug_flag:
+                data = ds_reader.train_data_transforms(raw_img)
+                data, label = ds_reader.train_joint_transforms(data, raw_mask)
+            else:
+                data = ds_reader.test_data_transforms(raw_img)
+                data, label = ds_reader.test_joint_transforms(data, raw_mask)
+            
+            return data, label
+
         if self.context_aware_prob > 0:
             for novel_obj_id in novel_class_idx:
                 assert novel_obj_id in support_set
@@ -272,7 +392,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                     scene_embedding = self.get_scene_embedding(novel_img_chw.to(self.device))
                     scene_embedding = scene_embedding.view((1,) + scene_embedding.shape)
                     similarity_score = F.cosine_similarity(scene_embedding, self.base_pool_cos_embeddings)
-                    base_candidates = torch.argsort(similarity_score)[-int(0.1 * self.base_pool_cos_embeddings.shape[0]):] # Indices array
+                    base_candidates = torch.argsort(similarity_score)[-int(0.05 * self.base_pool_cos_embeddings.shape[0]):] # Indices array
                     if novel_obj_id not in self.context_similar_map:
                         self.context_similar_map[novel_obj_id] = list(base_candidates.cpu().numpy())
                     else:
@@ -284,6 +404,9 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
             assert novel_obj_id in support_set
             for idx in support_set[novel_obj_id]:
                 novel_img_chw, mask_hw = self.continual_train_set[(idx, {'aug': False})]
+                if False:
+                    # use single instance
+                    novel_img_chw, mask_hw = extract_coco_w_single_instance(self.continual_train_set, idx, novel_obj_id, False)
                 img_roi, mask_roi = utils.crop_partial_img(novel_img_chw, mask_hw, cls_id=novel_obj_id)
                 assert mask_roi.shape[0] > 0 and mask_roi.shape[1] > 0
                 # Minimum bounding rectangle computed; now register it to the data pool
@@ -320,10 +443,6 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, polynomial_schedule)
 
         l2_criterion = nn.MSELoss()
-        my_kd_criterion = kd_criterion()
-
-        # Save vanilla self.post_processor (after MAP) for prototype distillation
-        post_processor_distillation_ref = deepcopy(self.post_processor)
 
         with trange(1, max_iter + 1, dynamic_ncols=True) as t:
             for iter_i in t:
@@ -340,16 +459,39 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                         mask_list.append(mask_hw)
                         fully_labeled_flag.append(True)
                     else:
-                        # full mask
-                        chosen_cls = random.choice(list(novel_class_idx))
+                        if True:
+                            # full mask
+                            chosen_cls = random.choice(list(novel_class_idx))
+                        else:
+                            if len(prv_novel_class_idx) > 0:
+                                chosen_cls = random.choice(list(prv_novel_class_idx))
+                            else:
+                                chosen_cls = random.choice(list(novel_class_idx))
                         idx = random.choice(support_set[chosen_cls])
                         img_chw, mask_hw = self.continual_train_set[idx]
-                        mask_hw[mask_hw != chosen_cls] = 0
-                        mask_hw[mask_hw == chosen_cls] = 1
+                        if False:
+                            # Mask non-novel portion using pseudo labels
+                            with torch.no_grad():
+                                data_bchw = img_chw.to(self.device)
+                                data_bchw = data_bchw.view((1,) + data_bchw.shape)
+                                feature = self.prv_backbone_net(data_bchw)
+                                ori_spatial_res = data_bchw.shape[-2:]
+                                output = self.prv_post_processor(feature, ori_spatial_res, scale_factor=10)
+                            tmp_target_hw = output.max(dim = 1)[1].cpu()[0]
+                            novel_mask = torch.zeros_like(mask_hw)
+                            for novel_obj_id in support_set.keys():
+                                novel_mask = torch.logical_or(novel_mask, mask_hw == novel_obj_id)
+                            tmp_target_hw[novel_mask] = mask_hw[novel_mask]
+                            mask_hw = tmp_target_hw
+                        if False:
+                            # use single instance
+                            img_chw, mask_hw = extract_coco_w_single_instance(self.continual_train_set, idx, chosen_cls, True)
+                        # mask_hw[mask_hw != chosen_cls] = 0
+                        # mask_hw[mask_hw == chosen_cls] = 1
                         image_list.append(img_chw)
                         mask_list.append(mask_hw)
-                        fully_labeled_flag.append(False)
-                        partial_positive_idx.append(chosen_cls)
+                        fully_labeled_flag.append(True)
+                        # partial_positive_idx.append(chosen_cls)
                 partial_positive_idx = torch.tensor(partial_positive_idx)
                 fully_labeled_flag = torch.tensor(fully_labeled_flag)
                 data_bchw = torch.stack(image_list).to(self.device).detach()
@@ -392,17 +534,12 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                     with torch.no_grad():
                         # self.vanilla_backbone_net for the base version
                         ori_feature = self.prv_backbone_net(data_bchw)
-                        ori_logit = self.prv_post_processor(ori_feature, ori_spatial_res, scale_factor=10)
+                        # ori_logit = self.prv_post_processor(ori_feature, ori_spatial_res, scale_factor=10)
 
                     # Feature extractor regularization + classifier regularization
                     regularization_loss = l2_criterion(feature, ori_feature)
                     regularization_loss = regularization_loss * self.cfg.TASK_SPECIFIC.GIFS.feature_reg_lambda # hyperparameter lambda
                     loss = loss + regularization_loss
-                    # PD Loss from PIFS
-                    with torch.no_grad():
-                        distill_output = post_processor_distillation_ref(ori_feature, ori_spatial_res, scale_factor=10)
-                    clf_loss = my_kd_criterion(output, distill_output) * self.cfg.TASK_SPECIFIC.GIFS.classifier_reg_lambda
-                    loss = loss + clf_loss
 
                 optimizer.zero_grad() # reset gradient
                 scaler.scale(loss).backward() # loss.backward()
