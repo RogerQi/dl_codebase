@@ -13,7 +13,7 @@ BACKBONE:
   network: 'deeplabv3_resnet101_renorm'
   pooling: False
   use_pretrained: True
-  pretrained_path: "/data/pretrained_model/resnet101-5d3b4d8f.pth"
+  pretrained_path: "/root/autodl-tmp/data/pretrained_model/resnet101-5d3b4d8f.pth"
 
 CLASSIFIER:
   classifier: "seg_cos"
@@ -69,7 +69,7 @@ TASK_SPECIFIC:
     sequential_dataset_num_classes: 5
     baseset_type: 'uniform_interval'
     probabilistic_synthesis_strat: 'vRFS'
-    num_runs: 5
+    num_runs: 1
 
 # PIFS
 # TASK_SPECIFIC:
