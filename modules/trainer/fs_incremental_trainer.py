@@ -108,16 +108,9 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                         img_weight = img_weight.cpu().unsqueeze(0)
                         similarity = F.cosine_similarity(img_weight, mean_weight_dic[c])
                         ##########################################
-                        # print('printing whole image pixels')
                         pixel_count = mask.shape[0] * mask.shape[1]
-                        # print('printing class size from mask')
                         class_pixel_count = torch.sum(mask_tensor == c)
-                        # print(class_pixel_count)
-                        # print('printing class-image ratio')
                         ratio = class_pixel_count / pixel_count
-                        # print(class_pixel_count / pixel_count)
-                        # print('printing similarity')
-                        # print(similarity)
                         similarity = similarity.to(self.device)
                         score = similarity / ratio
                         ##########################################
@@ -313,29 +306,14 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         '''
         assert len(img.shape) == 3 # CHW
         img = img.view((1,) + img.shape)
-        if True:
-            with torch.no_grad():
-                scene_embedding = encoder_forward(self.backbone_net, img)
-                scene_embedding = scene_embedding.squeeze()
-                norm = torch.norm(scene_embedding, p=2)
-                scene_embedding = scene_embedding.div(norm+ 1e-5)
-                return scene_embedding
-        else:
-            if img.shape[2] != 224:
-                # Scene model is trained using 224 x 224 size
-                img = F.interpolate(img, size = (224, 224), mode = 'bilinear')
-            with torch.no_grad():
-                scene_embedding = self.scene_model(img)
-                scene_embedding = torch.flatten(scene_embedding, start_dim = 1)
-                # normalize to unit vector
-                norm = torch.norm(scene_embedding, p=2, dim =1).unsqueeze(1).expand_as(scene_embedding) # norm
-                scene_embedding = scene_embedding.div(norm+ 1e-5)
-            return scene_embedding.squeeze()
+        with torch.no_grad():
+            scene_embedding = encoder_forward(self.backbone_net, img)
+            scene_embedding = scene_embedding.squeeze()
+            norm = torch.norm(scene_embedding, p=2)
+            scene_embedding = scene_embedding.div(norm+ 1e-5)
+            return scene_embedding
     
     def scene_model_setup(self):
-        self.scene_model = torch.jit.load('/data/cvpr2022/vgg16_scene_net.pt')
-        self.scene_model = self.scene_model.eval()
-        self.scene_model = self.scene_model.to(self.device)
         # Compute feature vectors for data in the pool
         self.base_pool_cos_embeddings = []
         for base_data_idx in self.base_img_candidates:
