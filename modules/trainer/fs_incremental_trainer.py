@@ -15,6 +15,8 @@ import math
 from tqdm import tqdm, trange
 from backbone.deeplabv3_renorm import BatchRenorm2d
 
+from einops import repeat, rearrange
+
 import utils
 
 from .sequential_GIFS_seg_trainer import sequential_GIFS_seg_trainer
@@ -48,6 +50,167 @@ def encoder_forward(backbone_net, x):
     return F.adaptive_avg_pool2d(x, 1)
 
 memory_bank_size = 500
+
+global_counter = 0
+
+# ======================================
+import sys
+# Somehow this was not loaded in venv
+for p in ['', '/home/roger/vision_hub', '/home/roger/FSLD', '/usr/lib/python38.zip', '/usr/lib/python3.8', '/usr/lib/python3.8/lib-dynload', '/home/roger/FSLD/latent_diffusion/lib/python3.8/site-packages', '/home/roger/FSLD/latent_diffusion/src/taming-transformers', '/home/roger/.local/lib/python3.8/site-packages', '/usr/local/lib/python3.8/dist-packages', '/usr/local/lib/python3.8/dist-packages/pybind11-2.6.1-py3.8.egg', '/home/roger/dep/mxnet/python', '/usr/local/lib/python3.8/dist-packages/pymesh2-0.3-py3.8-linux-x86_64.egg', '/usr/local/lib/python3.8/dist-packages/pykdtree-1.3.4-py3.8-linux-x86_64.egg', '/usr/local/lib/python3.8/dist-packages/Klampt-0.8.6-py3.8-linux-x86_64.egg', '/usr/local/lib/python3.8/dist-packages/DCNv2-0.1-py3.8-linux-x86_64.egg', '/usr/local/lib/python3.8/dist-packages/spatial_correlation_sampler-0.4.0-py3.8-linux-x86_64.egg', '/usr/local/lib/python3.8/dist-packages/SimpleCRF-0.2.1.1-py3.8-linux-x86_64.egg', '/usr/local/lib/python3.8/dist-packages/lvis-0.5.3-py3.8.egg', '/usr/local/lib/python3.8/dist-packages/python_dateutil-2.8.2-py3.8.egg', '/usr/local/lib/python3.8/dist-packages/tinycudann-1.6-py3.8-linux-x86_64.egg', '/usr/lib/python3/dist-packages']:
+    sys.path.append(p)
+
+from omegaconf import OmegaConf
+
+from ldm.util import instantiate_from_config
+
+from ldm.modules.encoders.modules import FrozenClipImageEmbedder
+
+def load_model_from_config(config, ckpt):
+    print(f"Loading model from {ckpt}")
+    pl_sd = torch.load(ckpt)#, map_location="cpu")
+    sd = pl_sd["state_dict"]
+    model = instantiate_from_config(config.model)
+    m, u = model.load_state_dict(sd, strict=False)
+    model.cuda()
+    model.eval()
+    return model
+
+def get_model():
+    config = OmegaConf.load("/home/roger/FSLD/configs/FSLD/pascal_5_3_128.yaml")  
+    model = load_model_from_config(config, "/home/roger/FSLD/logs/2023-02-14T03-15-43_pascal_5_3_128/checkpoints/last.ckpt")
+    return config, model
+
+from ldm.models.diffusion.ddim import DDIMSampler
+
+class diffusion_paster(object):
+    def __init__(self):
+        pass
+    
+    def modify_score(self, model, e_t, x, t, c,
+                     a_t, a_prev, sigma_t, sqrt_one_minus_at,
+                     support_set_z=None, init_noise=None):
+        if support_set_z is None or init_noise is None:
+            print("Did you forget to provide corrector kwargs?")
+            return e_t
+        
+        support_img_z_bchw = support_set_z
+        target_z = model.q_sample(support_img_z_bchw, t.cuda(), noise=init_noise)
+        img_grad = (target_z - x)
+        copy_paste_scale = 3
+        # TODO: implement gradient clipping for guaranteed well-behaved gradient
+        if t[0] >= 0:
+            e_t = e_t - copy_paste_scale * sqrt_one_minus_at * img_grad
+        return e_t
+
+class few_shot_hallucinator(object):
+    def __init__(self, cfg) -> None:
+        self.cfg = cfg
+        self.my_paster = diffusion_paster()
+        self.clip_encoder = FrozenClipImageEmbedder(model='ViT-L/14')
+        self.clip_encoder.eval()
+        self.clip_encoder.to("cpu") # cpu when unused for memory saving
+        
+        # Setup diffusion model
+        self.config, self.model = get_model()
+        self.sampler = DDIMSampler(self.model)
+
+        self.latent_size = self.config['model']['params']['unet_config']['params']['image_size']
+        self.pixel_size = self.config['model']['params']['first_stage_config']['params']['ddconfig']['resolution']
+
+    def compute_clip_embeddings(self, img_roi, mask_roi):
+        self.clip_encoder.to("cuda")
+        trans_img_roi = img_roi.clone()
+        trans_img_roi_np = utils.norm_tensor_to_np(self.cfg, trans_img_roi)
+        trans_img_roi_np[mask_roi != 1] = 0
+        trans_img_roi_np = rearrange(trans_img_roi_np, 'h w c -> c h w')
+        with torch.no_grad():
+            img_arr = torch.tensor(trans_img_roi_np).cuda().float()
+            img_arr = (img_arr / 127.5) - 1 # normalize to -1 to 1
+            img_arr = img_arr[None] # 1chw
+            # CLIP encoder does resizing internally
+            ret = self.clip_encoder(img_arr).squeeze().cpu()
+            self.clip_encoder.to("cpu")
+            return ret
+    
+    def compute_latent_img(self, img_roi, mask_roi):
+        # Read to latent space
+        trans_img_roi = img_roi.clone()
+        trans_img_roi_np = utils.norm_tensor_to_np(self.cfg, trans_img_roi)
+        trans_img_roi_np[mask_roi != 1] = 0
+        test_png = np.array(Image.fromarray(trans_img_roi_np).resize((self.pixel_size, self.pixel_size)))
+        test_png = test_png / 255.0
+        test_png = test_png.transpose((2, 0, 1))
+        normalized_x = test_png * 2 - 1
+        normalized_x = torch.tensor(normalized_x).cuda().float()
+        with torch.no_grad():
+            z = self.model.encode_first_stage(normalized_x[None]) # BCHW (1, 3, H/4 = 64, W/4 = 64)
+            z = self.model.get_first_stage_encoding(z).detach()[0].cpu() # CHW
+            return z
+    
+    def synthesize(self, img_chw, mask_hw, embedding_c, latent_img_chw):
+        # TODO: batch generation for speedup
+        n_samples_per_class = 1
+
+        embedding_1d = embedding_c[None] # (n_support=1, n_dim)
+        embedding_b1d = repeat(embedding_1d, 'n d -> b n d', b=n_samples_per_class) # (n_samples_per_class, n_support=1, n_dim)
+        embedding_b1d = torch.tensor(embedding_b1d).cuda().float()
+
+        latent_img_bchw = repeat(latent_img_chw, 'c h w -> b c h w', b=n_samples_per_class)
+
+        ddim_steps = 25
+        ddim_eta = 0.0
+        scale = 10.0   # for unconditional guidance
+
+        noise_shape = [3, self.latent_size, self.latent_size]
+        batched_shape = (n_samples_per_class,) + tuple(noise_shape)
+
+        # TODO: compute unconditional embedding
+
+        with torch.no_grad():
+            with self.model.ema_scope():
+                initial_noise = torch.randn(batched_shape, device=self.model.device)
+                embedding_b1d = embedding_b1d.cuda()
+                latent_img_bchw = latent_img_bchw.cuda()
+                
+                samples_ddim, intermediates = self.sampler.sample(S=ddim_steps,
+                                                conditioning=embedding_b1d,
+                                                batch_size=n_samples_per_class,
+                                                shape=[3, self.latent_size, self.latent_size],
+                                                verbose=False,
+                                                x_T=initial_noise,
+                                                eta=ddim_eta,
+                                                score_corrector=self.my_paster,
+                                                corrector_kwargs={'support_set_z': latent_img_bchw, 'init_noise': initial_noise},
+                                                log_every_t=1)
+
+                x_samples_ddim = self.model.decode_first_stage(samples_ddim)
+                img_bchw = torch.clamp((x_samples_ddim+1.0)/2.0, 
+                                            min=0.0, max=1.0)
+        
+        # Post processing
+        zero_thres = 2. / 255
+
+        fg_mask_bchw = img_bchw > zero_thres
+        fg_mask_bhw = fg_mask_bchw.all(axis=1)
+
+        # Renormalize
+        rgb_mean = self.cfg.DATASET.TRANSFORM.TEST.TRANSFORMS_DETAILS.NORMALIZE.mean
+        rgb_sd = self.cfg.DATASET.TRANSFORM.TEST.TRANSFORMS_DETAILS.NORMALIZE.sd
+        rgb_mean = torch.tensor(rgb_mean).cuda().float().reshape((1, 3, 1, 1))
+        rgb_sd = torch.tensor(rgb_sd).cuda().float().reshape((1, 3, 1, 1))
+        ret_img_bchw = (img_bchw - rgb_mean) / rgb_sd
+
+        # TODO: batch generation for speedup
+        ret_img_chw = ret_img_bchw[0]
+        fg_mask_hw = fg_mask_bhw[0]
+
+        # Interpolate to same size as img_chw and mask_hw
+        ret_img_chw = F.interpolate(ret_img_chw[None], size=img_chw.shape[1:], mode='bilinear', align_corners=False)[0]
+        fg_mask_hw = F.interpolate(fg_mask_hw[None, None].float(), size=mask_hw.shape, mode='nearest')[0, 0]
+
+        return ret_img_chw.cpu(), fg_mask_hw.bool().cpu()
+
+# ======================================
 
 class fs_incremental_trainer(sequential_GIFS_seg_trainer):
     def __init__(self, cfg, backbone_net, post_processor, criterion, dataset_module, device):
@@ -229,6 +392,8 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         self.base_img_candidates = self.construct_baseset()
         if self.context_aware_prob > 0:
             self.scene_model_setup()
+        # Setup CLIP
+        self.sample_hallucinator = few_shot_hallucinator(self.cfg)
         sequential_GIFS_seg_trainer.test_one(self, device, num_runs)
     
     def synthesizer_sample(self, novel_obj_id):
@@ -288,14 +453,25 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
             for i in range(num_existing_objects):
                 selected_class = np.random.choice(candidate_classes)
                 selected_sample = random.choice(self.partial_data_pool[selected_class])
-                full_img_chw, full_mask_hw, img_chw, mask_hw = selected_sample
+                _, _, img_chw, mask_hw, embedding_c, latent_img_chw = selected_sample
+                if torch.rand(1) < 0.5:
+                    hallu_obj, hallu_mask = self.sample_hallucinator.synthesize(img_chw, mask_hw, embedding_c, latent_img_chw)
+                    img_chw, mask_hw = hallu_obj, hallu_mask
                 syn_img_chw, syn_mask_hw = utils.copy_and_paste(img_chw, mask_hw, syn_img_chw, syn_mask_hw, selected_class)
 
         # Synthesize selected novel class
         if torch.rand(1) < selected_novel_prob:
             for i in range(num_novel_objects):
                 selected_sample = random.choice(self.partial_data_pool[novel_obj_id])
-                full_img_chw, full_mask_hw, img_chw, mask_hw = selected_sample
+                _, _, img_chw, mask_hw, embedding_c, latent_img_chw = selected_sample
+                if torch.rand(1) < 0.5:
+                    hallu_obj, hallu_mask = self.sample_hallucinator.synthesize(img_chw, mask_hw, embedding_c, latent_img_chw)
+                    img_chw, mask_hw = hallu_obj, hallu_mask
+                    global global_counter
+                    if False:
+                        utils.save_to_disk(self.cfg, img_chw, f'/tmp/obj_{novel_obj_id}_{global_counter}.png')
+                        utils.save_to_disk(self.cfg, mask_hw, f'/tmp/mask_{novel_obj_id}_{global_counter}.png')
+                    global_counter += 1
                 syn_img_chw, syn_mask_hw = utils.copy_and_paste(img_chw, mask_hw, syn_img_chw, syn_mask_hw, novel_obj_id)
 
         return (syn_img_chw, syn_mask_hw)
@@ -404,7 +580,11 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                 # Minimum bounding rectangle computed; now register it to the data pool
                 if novel_obj_id not in self.partial_data_pool:
                     self.partial_data_pool[novel_obj_id] = []
-                self.partial_data_pool[novel_obj_id].append((novel_img_chw, mask_hw == novel_obj_id, img_roi, mask_roi))
+                # Compute CLIP embedding
+                clip_embedding = self.sample_hallucinator.compute_clip_embeddings(img_roi, mask_roi).float()
+                # Compute latent image representation
+                latent_img_chw = self.sample_hallucinator.compute_latent_img(img_roi, mask_roi).float()
+                self.partial_data_pool[novel_obj_id].append((novel_img_chw, mask_hw == novel_obj_id, img_roi, mask_roi, clip_embedding, latent_img_chw))
 
         self.backbone_net.train()
         self.post_processor.train()
