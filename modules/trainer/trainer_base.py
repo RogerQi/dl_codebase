@@ -74,5 +74,19 @@ class trainer_base(object):
             file_path (str): path to trained weights
         """
         trained_weight_dict = torch.load(file_path)
-        self.backbone_net.load_state_dict(trained_weight_dict['backbone'], strict=True)
-        self.post_processor.load_state_dict(trained_weight_dict['head'], strict=True)
+        if 'model_state' in trained_weight_dict:
+            # weights from SSUL
+            backbone_dict = {}
+            head_dict = {}
+            for k in trained_weight_dict['model_state']:
+                if k.startswith('backbone.'):
+                    true_key = k[9:]
+                    backbone_dict[true_key] = trained_weight_dict['model_state'][k]
+                elif k.startswith('classifier.'):
+                    true_key = k.replace('classifier.', 'pixel_classifier.')
+                    head_dict[true_key] = trained_weight_dict['model_state'][k]
+            self.backbone_net.load_state_dict(backbone_dict, strict=True)
+            self.post_processor.load_state_dict(head_dict, strict=True)
+        else:
+            self.backbone_net.load_state_dict(trained_weight_dict['backbone'], strict=True)
+            self.post_processor.load_state_dict(trained_weight_dict['head'], strict=True)
