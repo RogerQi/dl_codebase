@@ -65,7 +65,7 @@ TASK_SPECIFIC:
     classifier_reg_lambda: 0.0
     context_aware_sampling_prob: 0.0
     sequential_dataset_num_classes: 5
-    baseset_type: 'random'
+    baseset_type: 'uniform_interval'
     probabilistic_synthesis_strat: 'vRFS'
     num_runs: 5
 
