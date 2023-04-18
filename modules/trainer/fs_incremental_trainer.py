@@ -71,7 +71,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
     
     def construct_baseset(self):
         baseset_type = self.cfg.TASK_SPECIFIC.GIFS.baseset_type
-        baseset_folder = f"save_{self.cfg.name}"
+        baseset_folder = f"baseset_subset/save_{self.cfg.name}"
         if baseset_type == 'random':
             print(f"construct {baseset_type} baseset for {self.cfg.name}")
             examplar_list = np.arange(0, len(self.train_set))
@@ -422,13 +422,14 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
             for img_path in glob.glob(os.path.join(cls_folder, '*.jpg')):
                 mask_path = img_path.replace('.jpg', '.png')
                 assert os.path.exists(mask_path)
-                if 'generated' in img_path:
+                # Exclude generated images and uncropped images
+                if 'generated' in img_path or 'raw' in img_path:
                     continue
                     self.generated_data_pool[novel_obj_id].append((img_path, mask_path))
                 else:
                     self.partial_data_pool[novel_obj_id].append((img_path, mask_path))
             # generated_img_folder = os.path.join('/data/GIFS_pascal_voc_split307fdd071a554be3391db8d3c2b9da9ea/{}'.format(str(novel_obj_id)), 'generated')
-            generated_img_folder = f"/home/roger/FSSegSynthesis/outputs/corrected_split_pascal5_3_realistic/{str(novel_obj_id)}"
+            generated_img_folder = f"/data/neurips2023/generated_image_sets/baseline_grounded/pascal5i_3/{str(novel_obj_id)}"
             if os.path.exists(generated_img_folder):
                 for img_path in glob.glob(os.path.join(generated_img_folder, '*.jpg')):
                     img_fn = os.path.basename(img_path)

@@ -10,9 +10,12 @@ class sequential_GIFS_seg_trainer(GIFS_seg_trainer):
         super(sequential_GIFS_seg_trainer, self).__init__(cfg, backbone_net, post_processor, criterion, dataset_module, device)
         
         self.partial_data_pool = {}
+        self.generated_data_pool = {}
     
     def continual_test_single_pass(self, support_set):
+        # TODO: put this reset in child class
         self.partial_data_pool = {}
+        self.generated_data_pool = {}
         self.context_similar_map = {}
         self.vanilla_backbone_net = deepcopy(self.backbone_net)
         self.vanilla_post_processor = deepcopy(self.post_processor)
