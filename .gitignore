@@ -1,4 +1,5 @@
 # User added
+baseset_subset/
 # ipynb is usually large... use git add -f if necessary
 *.ipynb
 .DS_Store

@@ -68,10 +68,9 @@ TASK_SPECIFIC:
     classifier_lr: 1e-2
     feature_reg_lambda: 0.1
     classifier_reg_lambda: 0.0
-    context_aware_sampling_prob: 0.0
-    sequential_dataset_num_classes: 5
+    context_aware_sampling_prob: 0.9
     baseset_type: 'uniform_interval'
-    probabilistic_synthesis_strat: 'vRFS'
+    probabilistic_synthesis_strat: 'always'
     num_runs: 5
 
 # PIFS

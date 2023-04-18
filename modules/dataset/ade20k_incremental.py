@@ -111,7 +111,7 @@ class ADE20KIncrementalReader(datasets.vision.VisionDataset):
         return target_tensor
 
 def get_train_set(cfg):
-    ds = ADE20KIncrementalReader(utils.get_dataset_root(), True, exclude_novel=False)
+    ds = ADE20KIncrementalReader(utils.get_dataset_root(), True, exclude_novel=True)
     return base_set(ds, "train", cfg)
 
 def get_val_set(cfg):

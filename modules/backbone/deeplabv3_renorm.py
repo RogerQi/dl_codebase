@@ -288,7 +288,6 @@ class ResNet(backbone_base):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        size = (x.shape[2], x.shape[3])
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)

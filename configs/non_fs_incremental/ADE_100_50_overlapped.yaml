@@ -59,16 +59,18 @@ TASK_SPECIFIC:
   GIFS:
     fine_tuning: True
     pseudo_base_label: False
-    max_iter: 200
-    ft_batch_size: 16
+    max_iter: 1000
+    # num_shots: 5
+    ft_batch_size: 10
     backbone_lr: 1e-3
     classifier_lr: 1e-2
-    feature_reg_lambda: 0.1
+    feature_reg_lambda: 0.5
     classifier_reg_lambda: 0.0
-    context_aware_sampling_prob: 0.0
+    context_aware_sampling_prob: 0.9
+    sequential_dataset_num_classes: 5
     baseset_type: 'uniform_interval'
     probabilistic_synthesis_strat: 'vRFS'
-    num_runs: 5
+    num_runs: 1
 
 # PIFS
 # TASK_SPECIFIC:
