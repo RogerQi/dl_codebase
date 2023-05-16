@@ -65,7 +65,9 @@ def main():
         pretrained_weight_dict = torch.load(weight_path)
         # Log missing/uncompatible keys
         if 'backbone' in pretrained_weight_dict:
-            print(backbone_net.load_state_dict(pretrained_weight_dict['backbone'], strict=False))
+            pretrained_weight_dict = pretrained_weight_dict['backbone']
+        if hasattr(backbone_net, 'backbone'):
+            print(backbone_net.backbone.load_state_dict(pretrained_weight_dict, strict=False))
         else:
             print(backbone_net.load_state_dict(pretrained_weight_dict, strict=False))
 
