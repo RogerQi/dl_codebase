@@ -71,7 +71,7 @@ class ADE20KSegReader(datasets.vision.VisionDataset):
             tuple: (image, target) where target is the image segmentation.
         """
         img = Image.open(self.images[index]).convert('RGB')
-        target = np.array(Image.open(self.masks[index])).astype(np.int)
+        target = np.array(Image.open(self.masks[index])).astype(int)
 
         target[target == 255] = -1
 
