@@ -256,8 +256,8 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         num_novel_classes = len(self.partial_data_pool)
         total_classes = num_base_classes + num_novel_classes
         num_novel_instances = len(self.partial_data_pool[novel_obj_id])
-        for k in candidate_classes:
-            assert len(self.partial_data_pool[k]) == num_novel_instances, "every class is expected to have $numShot$ samples"
+        # for k in candidate_classes:
+        #     assert len(self.partial_data_pool[k]) == num_novel_instances, "every class is expected to have $numShot$ samples"
         if self.cfg.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat == 'vRFS':
             t = 1. / total_classes
             f_n = num_novel_instances / memory_bank_size
@@ -270,8 +270,8 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
         elif self.cfg.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat == 'always':
             other_prob = 1
             selected_novel_prob = 1
-            num_existing_objects = 2
-            num_novel_objects = 2
+            num_existing_objects = 1
+            num_novel_objects = 1
         elif self.cfg.TASK_SPECIFIC.GIFS.probabilistic_synthesis_strat == 'CAS':
             other_prob = 1. / total_classes
             selected_novel_prob = 1. / total_classes
@@ -310,7 +310,17 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                 mask_hw = (mask_hw > 0) # boolean type
                 img_chw = torch.tensor(img_chw, dtype=torch.float32)
                 mask_hw = torch.tensor(mask_hw)
-                syn_img_chw, syn_mask_hw = utils.copy_and_paste(img_chw, mask_hw, syn_img_chw, syn_mask_hw, selected_class)
+                img_roi, mask_roi = utils.crop_partial_img(img_chw, mask_hw, cls_id=1)
+                if '/generated/' in img_path:
+                    base_img_fn = os.path.dirname(img_path).split('/')[-2]
+                    base_img_path = os.path.join(os.path.dirname(img_path), '..', '{}.jpg'.format(base_img_fn))
+                    base_W, base_H = Image.open(base_img_path).size
+                    # Interpolate img_roi to base image size
+                    img_roi = F.interpolate(img_roi.unsqueeze(0), size=(base_H, base_W), mode='bilinear', align_corners=False)
+                    img_roi = img_roi.squeeze(0)
+                    mask_roi = F.interpolate(mask_roi.unsqueeze(0).unsqueeze(0).float(), size=(base_H, base_W), mode='nearest')
+                    mask_roi = mask_roi.squeeze(0).squeeze(0).byte()
+                syn_img_chw, syn_mask_hw = utils.copy_and_paste(img_roi, mask_roi, syn_img_chw, syn_mask_hw, selected_class)
 
         # Synthesize selected novel class
         if torch.rand(1) < selected_novel_prob:
@@ -333,7 +343,19 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                 mask_hw = (mask_hw > 0) # boolean type
                 img_chw = torch.tensor(img_chw, dtype=torch.float32)
                 mask_hw = torch.tensor(mask_hw)
-                syn_img_chw, syn_mask_hw = utils.copy_and_paste(img_chw, mask_hw, syn_img_chw, syn_mask_hw, novel_obj_id)
+                img_roi, mask_roi = utils.crop_partial_img(img_chw, mask_hw, cls_id=1)
+                if '/generated/' in img_path:
+                    base_img_fn = os.path.dirname(img_path).split('/')[-2]
+                    base_img_path = os.path.join(os.path.dirname(img_path), '..', '{}.jpg'.format(base_img_fn))
+                    base_W, base_H = Image.open(base_img_path).size
+                    # Interpolate img_roi to base image size
+                    img_roi = F.interpolate(img_roi.unsqueeze(0), size=(base_H, base_W), mode='bilinear', align_corners=False)
+                    img_roi = img_roi.squeeze(0)
+                    mask_roi = F.interpolate(mask_roi.unsqueeze(0).unsqueeze(0).float(), size=(base_H, base_W), mode='nearest')
+                    mask_roi = mask_roi.squeeze(0).squeeze(0).byte()
+                syn_img_chw, syn_mask_hw = utils.copy_and_paste(img_roi, mask_roi, syn_img_chw, syn_mask_hw, novel_obj_id)
+
+        # syn_img_chw = hallucinate_one(syn_img_chw, self.cfg)
 
         return (syn_img_chw, syn_mask_hw)
     
@@ -428,16 +450,31 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                     self.generated_data_pool[novel_obj_id].append((img_path, mask_path))
                 else:
                     self.partial_data_pool[novel_obj_id].append((img_path, mask_path))
+            # Load from text-based aug
+            # base_dir = '/data/GIFS_pascal_voc_split307fdd071a554be3391db8d3c2b9da9ea_new_new'
+            # cls_dir = os.path.join(base_dir, str(novel_obj_id))
+            # if os.path.exists(cls_dir):
+            #     img_folder_list = [fn for fn in os.listdir(cls_dir) if (not fn.endswith('.jpg') and not fn.endswith('.png') and fn != 'generated')]
+            #     for base_img_fn in img_folder_list:
+            #         generated_dir = os.path.join(cls_dir, base_img_fn, 'generated')
+            #         img_fn_list = [fn for fn in os.listdir(generated_dir) if fn.endswith('.jpg')]
+            #         for img_fn in img_fn_list:
+            #             img_path = os.path.join(generated_dir, img_fn)
+            #             mask_path = img_path.replace('.jpg', '.png')
+            #             assert os.path.exists(mask_path), mask_path
+            #             self.partial_data_pool[novel_obj_id].append((img_path, mask_path))
             # generated_img_folder = os.path.join('/data/GIFS_pascal_voc_split307fdd071a554be3391db8d3c2b9da9ea/{}'.format(str(novel_obj_id)), 'generated')
-            generated_img_folder = f"/data/neurips2023/generated_image_sets/baseline_grounded/pascal5i_3/{str(novel_obj_id)}"
+            # generated_img_folder = f"/tmp/sam_only_1/{str(novel_obj_id)}"
+
+            # pascal5i_final
+            generated_img_folder = f"/data/neurips2023/final_masks/semi_supervised/coco20i_final/{str(novel_obj_id)}"
             if os.path.exists(generated_img_folder):
                 for img_path in glob.glob(os.path.join(generated_img_folder, '*.jpg')):
-                    img_fn = os.path.basename(img_path)
-                    generated_img_id = int(img_fn.split('_')[0])
-                    if generated_img_id % 4 == 0 or True:
-                        mask_path = img_path.replace('.jpg', '.png')
-                        assert os.path.exists(mask_path)
-                        self.generated_data_pool[novel_obj_id].append((img_path, mask_path))
+                    mask_path = img_path.replace('.jpg', '.png')
+                    assert os.path.exists(mask_path)
+                    self.generated_data_pool[novel_obj_id].append((img_path, mask_path))
+                # Keep only 1/4 of the generated images
+                # self.generated_data_pool[novel_obj_id] = self.generated_data_pool[novel_obj_id][::4]
             print("Loaded {} generated images for class {}".format(len(self.generated_data_pool[novel_obj_id]), novel_obj_id))
             print("Loaded {} real images for class {}".format(len(self.partial_data_pool[novel_obj_id]), novel_obj_id))
 
@@ -552,39 +589,65 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                         mask_list.append(mask_hw)
                         fully_labeled_flag.append(True)
                     else:
-                        if torch.rand(1) < 0.5:
-                            # full mask
-                            chosen_cls = random.choice(list(novel_class_idx))
-                        else:
-                            if len(prv_novel_class_idx) > 0:
-                                chosen_cls = random.choice(list(prv_novel_class_idx))
-                            else:
-                                chosen_cls = random.choice(list(novel_class_idx))
-                        idx = random.choice(support_set[chosen_cls])
-                        img_chw, mask_hw = self.continual_train_set[idx]
                         if True:
-                            # Mask non-novel portion using pseudo labels
-                            with torch.no_grad():
-                                data_bchw = img_chw.to(self.device)
-                                data_bchw = data_bchw.view((1,) + data_bchw.shape)
-                                feature = self.prv_backbone_net(data_bchw)
-                                ori_spatial_res = data_bchw.shape[-2:]
-                                output = self.prv_post_processor(feature, ori_spatial_res, scale_factor=10)
-                            tmp_target_hw = output.max(dim = 1)[1].cpu()[0]
-                            novel_mask = torch.zeros_like(mask_hw)
-                            for novel_obj_id in support_set.keys():
-                                novel_mask = torch.logical_or(novel_mask, mask_hw == novel_obj_id)
-                            tmp_target_hw[novel_mask] = mask_hw[novel_mask]
-                            mask_hw = tmp_target_hw
-                        if False:
-                            # use single instance
-                            img_chw, mask_hw = extract_coco_w_single_instance(self.continual_train_set, idx, chosen_cls, True)
-                        # mask_hw[mask_hw != chosen_cls] = 0
-                        # mask_hw[mask_hw == chosen_cls] = 1
-                        image_list.append(img_chw)
-                        mask_list.append(mask_hw)
-                        fully_labeled_flag.append(True)
-                        # partial_positive_idx.append(chosen_cls)
+                            if torch.rand(1) < 0.5:
+                                selected_class = random.choice(novel_class_idx)
+                            else:
+                                selected_class = random.choice(list(self.generated_data_pool.keys()))
+                            selected_sample = random.choice(self.generated_data_pool[selected_class])
+                            img_path, mask_path = selected_sample
+                            img_chw = np.array(Image.open(img_path).convert('RGB'))
+                            # normalize image
+                            img_chw = img_chw / 255.
+                            rgb_mean = self.cfg.DATASET.TRANSFORM.TRAIN.TRANSFORMS_DETAILS.NORMALIZE.mean
+                            rgb_std = self.cfg.DATASET.TRANSFORM.TRAIN.TRANSFORMS_DETAILS.NORMALIZE.sd
+                            img_chw = (img_chw - rgb_mean) / rgb_std
+                            img_chw = img_chw.transpose(2, 0, 1)
+                            mask_hw = np.array(Image.open(mask_path))
+                            if len(mask_hw.shape) == 3:
+                                mask_hw = mask_hw[:, :, 0]
+                            mask_hw = (mask_hw > 0) # boolean type
+                            img_chw = torch.tensor(img_chw, dtype=torch.float32)
+                            mask_hw = torch.tensor(mask_hw)
+                            mask_hw = mask_hw.int()
+                            mask_hw[mask_hw > 0] = selected_class
+                            image_list.append(img_chw)
+                            mask_list.append(mask_hw)
+                            fully_labeled_flag.append(True)
+                        else:
+                            if True:
+                                # full mask
+                                chosen_cls = random.choice(list(novel_class_idx))
+                            else:
+                                if len(prv_novel_class_idx) > 0:
+                                    chosen_cls = random.choice(list(prv_novel_class_idx))
+                                else:
+                                    chosen_cls = random.choice(list(novel_class_idx))
+                            idx = random.choice(support_set[chosen_cls])
+                            img_chw, mask_hw = self.continual_train_set[idx]
+                            if False:
+                                # Mask non-novel portion using pseudo labels
+                                with torch.no_grad():
+                                    data_bchw = img_chw.to(self.device)
+                                    data_bchw = data_bchw.view((1,) + data_bchw.shape)
+                                    feature = self.prv_backbone_net(data_bchw)
+                                    ori_spatial_res = data_bchw.shape[-2:]
+                                    output = self.prv_post_processor(feature, ori_spatial_res, scale_factor=10)
+                                tmp_target_hw = output.max(dim = 1)[1].cpu()[0]
+                                novel_mask = torch.zeros_like(mask_hw)
+                                for novel_obj_id in support_set.keys():
+                                    novel_mask = torch.logical_or(novel_mask, mask_hw == novel_obj_id)
+                                tmp_target_hw[novel_mask] = mask_hw[novel_mask]
+                                mask_hw = tmp_target_hw
+                            if False:
+                                # use single instance
+                                img_chw, mask_hw = extract_coco_w_single_instance(self.continual_train_set, idx, chosen_cls, True)
+                            # mask_hw[mask_hw != chosen_cls] = 0
+                            # mask_hw[mask_hw == chosen_cls] = 1
+                            image_list.append(img_chw)
+                            mask_list.append(mask_hw)
+                            fully_labeled_flag.append(True)
+                            # partial_positive_idx.append(chosen_cls)
                 partial_positive_idx = torch.tensor(partial_positive_idx)
                 fully_labeled_flag = torch.tensor(fully_labeled_flag)
                 data_bchw = torch.stack(image_list).to(self.device).detach()
