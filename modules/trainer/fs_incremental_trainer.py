@@ -466,15 +466,18 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
             # generated_img_folder = os.path.join('/data/GIFS_pascal_voc_split307fdd071a554be3391db8d3c2b9da9ea/{}'.format(str(novel_obj_id)), 'generated')
             # generated_img_folder = f"/tmp/sam_only_1/{str(novel_obj_id)}"
 
-            # pascal5i_final
-            generated_img_folder = f"/data/neurips2023/final_masks/semi_supervised/coco20i_final/{str(novel_obj_id)}"
+            # pascal5i_final; coco20i_final
+            generated_img_folder = os.path.join(
+                utils.get_dataset_root(),
+                f"neurips2023/final_masks/semi_supervised/pascal5i_final/{str(novel_obj_id)}"
+            )
             if os.path.exists(generated_img_folder):
                 for img_path in glob.glob(os.path.join(generated_img_folder, '*.jpg')):
                     mask_path = img_path.replace('.jpg', '.png')
                     assert os.path.exists(mask_path)
                     self.generated_data_pool[novel_obj_id].append((img_path, mask_path))
                 # Keep only 1/4 of the generated images
-                # self.generated_data_pool[novel_obj_id] = self.generated_data_pool[novel_obj_id][::4]
+                self.generated_data_pool[novel_obj_id] = self.generated_data_pool[novel_obj_id][:10]
             print("Loaded {} generated images for class {}".format(len(self.generated_data_pool[novel_obj_id]), novel_obj_id))
             print("Loaded {} real images for class {}".format(len(self.partial_data_pool[novel_obj_id]), novel_obj_id))
 
@@ -589,7 +592,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                         mask_list.append(mask_hw)
                         fully_labeled_flag.append(True)
                     else:
-                        if True:
+                        if torch.rand(1) < 0.5:
                             if torch.rand(1) < 0.5:
                                 selected_class = random.choice(novel_class_idx)
                             else:
@@ -615,7 +618,7 @@ class fs_incremental_trainer(sequential_GIFS_seg_trainer):
                             mask_list.append(mask_hw)
                             fully_labeled_flag.append(True)
                         else:
-                            if True:
+                            if torch.rand(1) < 0.5:
                                 # full mask
                                 chosen_cls = random.choice(list(novel_class_idx))
                             else:
