@@ -9,6 +9,9 @@ def norm_tensor_to_np(cfg, arr):
     Parameters:
         - cfg: config node
         - arr: normalized floating point torch.Tensor of shape (3, H, W)
+    
+    Returns:
+        - arr: unnormalized numpy array of shape (H, W, 3)
     """
     assert isinstance(arr, torch.Tensor)
     assert arr.shape[0] == 3

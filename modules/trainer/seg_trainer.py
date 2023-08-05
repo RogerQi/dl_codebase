@@ -92,7 +92,7 @@ class seg_trainer(trainer_base):
                     feature = self.backbone_net_(input_tensor)
                     ori_spatial_res = input_tensor.shape[-2:]
                     output = self.post_processor_(feature, ori_spatial_res)
-                    output = torch.softmax(output, dim=1)[0] # CHW
+                    output = torch.softmax(output, dim=1) # BCHW
                     return output
         my_dummy_predictor = dummy_predictor(self.backbone_net, self.post_processor)
         traced_script_module = torch.jit.trace(my_dummy_predictor, dummy_tensor)

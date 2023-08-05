@@ -29,17 +29,20 @@ def dataset_dispatcher(cfg):
     elif dataset_name == "pascal_5i":
         import dataset.pascal_5i
         return dataset.pascal_5i
+    elif dataset_name == "voc2012_5i":
+        import dataset.voc2012_5i
+        return dataset.voc2012_5i
     elif dataset_name == "scannet_25k":
         import dataset.scannet_25k
         return dataset.scannet_25k
     elif dataset_name == "coco_20i":
         import dataset.coco_20i
         return dataset.coco_20i
-    elif dataset_name == "coco_GIFS":
-        import dataset.coco_GIFS
-        return dataset.coco_GIFS
     elif dataset_name == "places365_stanford":
         import dataset.places365_stanford
         return dataset.places365_stanford
+    elif dataset_name == "ade20k_incremental":
+        import dataset.ade20k_incremental
+        return dataset.ade20k_incremental
     else:
         raise NotImplementedError

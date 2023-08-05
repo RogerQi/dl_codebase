@@ -13,7 +13,7 @@ BACKBONE:
   network: 'deeplabv3_resnet101_renorm'
   pooling: False
   use_pretrained: True
-  pretrained_path: "/data/pretrained_model/resnet101-5d3b4d8f.pth"
+  pretrained_path: "/root/autodl-tmp/data/pretrained_model/resnet101-5d3b4d8f.pth"
 
 CLASSIFIER:
   classifier: "seg_cos"
@@ -60,14 +60,14 @@ TASK_SPECIFIC:
     pseudo_base_label: False
     max_iter: 400
     num_shots: 5
-    ft_batch_size: 10
+    ft_batch_size: 16
     backbone_lr: 1e-3
     classifier_lr: 1e-2
     feature_reg_lambda: 0.5
     classifier_reg_lambda: 0.0
-    context_aware_sampling_prob: 0.0
+    context_aware_sampling_prob: 0.9
     sequential_dataset_num_classes: 5
-    baseset_type: 'random'
+    baseset_type: 'uniform_interval'
     probabilistic_synthesis_strat: 'vRFS'
     num_runs: 5
 

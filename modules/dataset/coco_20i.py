@@ -189,9 +189,9 @@ def get_train_set(cfg):
     ds = COCO20iReader(COCO_PATH, folding, True, exclude_novel=True)
     return base_set(ds, "train", cfg)
 
-def get_unaug_train_set(cfg):
+def get_val_set(cfg):
     folding = cfg.DATASET.COCO20i.folding
-    ds = COCO20iReader(COCO_PATH, folding, True, exclude_novel=True)
+    ds = COCO20iReader(COCO_PATH, folding, False, exclude_novel=False)
     return base_set(ds, "test", cfg)
 
 def get_train_set_vanilla_label(cfg):
@@ -199,21 +199,7 @@ def get_train_set_vanilla_label(cfg):
     ds = COCO20iReader(COCO_PATH, folding, True, exclude_novel=True, vanilla_label=True)
     return base_set(ds, "train", cfg)
 
-def get_vanilla_train_set_vanilla_label(cfg):
-    folding = cfg.DATASET.COCO20i.folding
-    ds = COCO20iReader(COCO_PATH, folding, True, exclude_novel=True, vanilla_label=True)
-    return base_set(ds, "test", cfg)
-
-def get_val_set(cfg):
-    folding = cfg.DATASET.COCO20i.folding
-    ds = COCO20iReader(COCO_PATH, folding, False, exclude_novel=False)
-    return base_set(ds, "test", cfg)
-
-def get_continual_vanilla_train_set(cfg):
-    ds = COCOSeg(COCO_PATH, True)
-    return base_set(ds, "test", cfg) # Use test config to keep original scale of the image.
-
-def get_continual_aug_train_set(cfg):
+def get_continual_train_set(cfg):
     ds = COCOSeg(COCO_PATH, True)
     return base_set(ds, "train", cfg)
 

@@ -40,7 +40,9 @@ def crop_partial_img(img_chw, mask_hw, cls_id=1):
 
     # Crop annotated objects off the image
     # Compute a minimum rectangle containing the object
-    assert len(contours) != 0
+    if len(contours) == 0:
+        print("Copy-paste got an empty mask!")
+        return (img_chw, binary_mask_hw)
     cnt = contours[0]
     x_min = tuple(cnt[cnt[:,:,0].argmin()][0])[0]
     x_max = tuple(cnt[cnt[:,:,0].argmax()][0])[0]

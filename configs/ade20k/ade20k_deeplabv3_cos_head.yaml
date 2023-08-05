@@ -32,24 +32,23 @@ DATASET:
         crop_size: (512, 512)
     TEST:
       transforms: ('normalize', )
+      joint_transforms: ('joint_resize_center_crop', )
       TRANSFORMS_DETAILS:
         NORMALIZE:
           mean: (0.4700, 0.4468, 0.4076)
           sd: (0.2439, 0.2390, 0.2420)
+        crop_size: (512, 512)
 
 TRAIN:
-  max_epochs: 50
-  batch_size: 12
-  initial_lr: 0.007
-  lr_scheduler: "step_down"
-  step_down_gamma: 0.1
-  step_down_on_epoch: [999]
+  max_epochs: 60
+  batch_size: 16
+  initial_lr: 1e-2
+  lr_scheduler: "polynomial"
   log_interval: 20
   OPTIMIZER:
     type: "SGD"
     momentum: 0.9
     weight_decay: 0.0001
-
 
 TEST:
   batch_size: 1

@@ -129,6 +129,7 @@ _C.DATASET.NUMPY_READER.test_label_npy_path = "/"
 _C.DATASET.NUMPY_READER.mmap = False
 _C.DATASET.PASCAL5i = CN()
 _C.DATASET.PASCAL5i.folding = -1
+_C.DATASET.PASCAL5i.disjoint = True # See https://github.com/fcdl94/MiB
 _C.DATASET.COCO20i = CN()
 _C.DATASET.COCO20i.folding = -1
 
@@ -158,7 +159,7 @@ _C.TASK_SPECIFIC = CN()
 # GIFS Reproduction: https://arxiv.org/pdf/2012.01415.pdf
 #######################
 _C.TASK_SPECIFIC.GIFS = CN()
-_C.TASK_SPECIFIC.GIFS.num_shots = 5
+_C.TASK_SPECIFIC.GIFS.num_shots = -1
 _C.TASK_SPECIFIC.GIFS.fine_tuning = True
 _C.TASK_SPECIFIC.GIFS.pseudo_base_label = False
 _C.TASK_SPECIFIC.GIFS.ft_batch_size = 5
