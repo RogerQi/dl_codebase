@@ -2,7 +2,7 @@ Cython==0.29.16
 h5py==2.9.0
 numpy==1.22.0
 scipy==1.10.0
-Pillow==9.3.0
+Pillow==10.0.1
 pycocotools==2.0
 PyYAML==5.4
 tensorboard==2.1.1
